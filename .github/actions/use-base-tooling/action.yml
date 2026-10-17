@@ -1,0 +1,24 @@
+name: Use the agent tooling from the base branch
+description: >-
+  Replaces the agent configuration and scripts in the pull request checkout with the
+  versions from the base branch, and removes files Claude Code would load by itself.
+  Reference it remotely (owner/repo/.github/actions/use-base-tooling@main), never as a
+  local ./ path: a local path would load it from the pull request's own files.
+  The logic is in .github/scripts/Restore-BaseTooling.ps1.
+
+inputs:
+  base-ref:
+    description: The base branch of the pull request, for example main.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Restore the agent tooling
+      shell: pwsh
+      env:
+        BASE_REF: ${{ inputs.base-ref }}
+      # GITHUB_ACTION_PATH is this folder in GitHub's copy of the repository at the
+      # referenced ref (main), so the script comes from there too. ./.github/scripts
+      # would be the pull request's version, which is what this step replaces.
+      run: '& "$env:GITHUB_ACTION_PATH/../../scripts/Restore-BaseTooling.ps1" -BaseRef $env:BASE_REF'
