@@ -1,3 +1,5 @@
+#Requires -Version 7.4
+
 # Builds the pull request comment from the verification and the agent's result.
 # Text written by the agent (an LLM) is untrusted: it is escaped before it is shown,
 # so it cannot add HTML, links that look like ours, or mentions that notify people.
@@ -37,7 +39,7 @@ function Get-PrCommentMarker {
     [OutputType([string])]
     param()
 
-    $script:Marker
+    return $script:Marker
 }
 
 function ConvertTo-SafeMarkdown {
@@ -81,7 +83,7 @@ function ConvertTo-SafeMarkdown {
     if ($SingleLine) {
         $safe = ($safe -replace '\s*\r?\n\s*', ' ').Replace('|', '\|')
     }
-    $safe
+    return $safe
 }
 
 function ConvertTo-CodeBlock {
@@ -110,11 +112,16 @@ function ConvertTo-CodeBlock {
     }
     $longest = ([regex]::Matches($Code, '`+') | ForEach-Object { $_.Length } | Measure-Object -Maximum).Maximum
     $fence = '`' * [Math]::Max(3, [int]$longest + 1)
-    "$fence$Language`n$Code`n$fence"
+    return "$fence$Language`n$Code`n$fence"
 }
 
 function Get-Headline {
-    # The first line of the comment: what happened, in a few words.
+    <#
+    .SYNOPSIS
+        Returns the first line of the comment: what happened, in a few words.
+    .DESCRIPTION
+        Based on the verify job's verdict and on whether the tests were committed.
+    #>
     [CmdletBinding()]
     [OutputType([string])]
     param(
@@ -146,11 +153,15 @@ function Get-Headline {
     if ($Verification.verdict -eq 'rejected') {
         return "🛑 The agent's output was rejected: nothing was committed"
     }
-    '⚠️ Unknown result'
+    return '⚠️ Unknown result'
 }
 
 function Get-ModuleEntry {
-    # The agent's entry for one module, or $null.
+    <#
+    .SYNOPSIS
+        Returns the agent's entry for one module, or $null when the agent did not
+        report on it (or returned no valid result).
+    #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $false)]
@@ -164,7 +175,7 @@ function Get-ModuleEntry {
     if (-not $AgentResult) {
         return $null
     }
-    $AgentResult.modules | Where-Object { $_.module -eq $Module } | Select-Object -First 1
+    return $AgentResult.modules | Where-Object { $_.module -eq $Module } | Select-Object -First 1
 }
 
 function New-PrCommentBody {
@@ -183,6 +194,7 @@ function New-PrCommentBody {
     .PARAMETER PushError
         Why the commit could not be pushed, if it could not.
     #>
+    [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Builds an object in memory; changes no system state.')]
     [CmdletBinding()]
     [OutputType([string])]
     param(
@@ -370,7 +382,7 @@ function New-PrCommentBody {
     if ($body.Length -gt $script:MaxBodyLength) {
         $body = $body.Substring(0, $script:MaxBodyLength) + "`n`n… The comment was cut; see the workflow run for everything."
     }
-    $body
+    return $body
 }
 
 Export-ModuleMember -Function Get-PrCommentMarker, ConvertTo-SafeMarkdown, ConvertTo-CodeBlock, New-PrCommentBody

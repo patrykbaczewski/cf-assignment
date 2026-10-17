@@ -1,3 +1,5 @@
+#Requires -Version 7.4
+
 # Runs Terraform inside a locked-down Docker container.
 #
 # Module code from a pull request is untrusted: a module can run local programs
@@ -14,8 +16,10 @@ function New-SandboxCopy {
     <#
     .SYNOPSIS
         Copies a module to a new temporary folder and returns that folder's path.
+    .DESCRIPTION
+        Supports -WhatIf: the path is returned, but nothing is copied.
     #>
-    [CmdletBinding()]
+    [CmdletBinding(SupportsShouldProcess = $true)]
     [OutputType([string])]
     param(
         [Parameter(Mandatory = $true)]
@@ -30,11 +34,13 @@ function New-SandboxCopy {
     }
     $workDir = Join-Path $tempRoot "$script:WorkDirPrefix$([guid]::NewGuid().ToString('N'))"
 
-    Copy-Item -LiteralPath $SourcePath -Destination $workDir -Recurse
-    # Leftovers from a local `terraform init` must not leak into the run.
-    Remove-Item -LiteralPath (Join-Path $workDir '.terraform') -Recurse -Force -ErrorAction SilentlyContinue
+    if ($PSCmdlet.ShouldProcess($workDir, "Copy module $SourcePath")) {
+        Copy-Item -LiteralPath $SourcePath -Destination $workDir -Recurse
+        # Leftovers from a local `terraform init` must not leak into the run.
+        Remove-Item -LiteralPath (Join-Path $workDir '.terraform') -Recurse -Force -ErrorAction SilentlyContinue
+    }
 
-    $workDir
+    return $workDir
 }
 
 function Remove-SandboxCopy {
@@ -42,7 +48,7 @@ function Remove-SandboxCopy {
     .SYNOPSIS
         Deletes a folder created by New-SandboxCopy, and refuses any other folder.
     #>
-    [CmdletBinding()]
+    [CmdletBinding(SupportsShouldProcess = $true)]
     param(
         [Parameter(Mandatory = $true)]
         [string] $Path
@@ -51,7 +57,9 @@ function Remove-SandboxCopy {
     if ((Split-Path -Leaf $Path) -notlike "$script:WorkDirPrefix*") {
         throw "Refusing to delete '$Path': it is not a sandbox copy."
     }
-    Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction SilentlyContinue
+    if ($PSCmdlet.ShouldProcess($Path, 'Delete the sandbox copy')) {
+        Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction SilentlyContinue
+    }
 }
 
 function Invoke-TerraformInSandbox {
@@ -102,7 +110,7 @@ function Invoke-TerraformInSandbox {
     $dockerArgs += $TerraformArgs
 
     $output = & docker @dockerArgs 2>&1 | ForEach-Object { "$_" }
-    [pscustomobject]@{
+    return [pscustomobject]@{
         ExitCode = $LASTEXITCODE
         Output   = @($output)
     }

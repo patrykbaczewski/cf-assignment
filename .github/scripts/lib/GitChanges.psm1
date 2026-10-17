@@ -1,10 +1,18 @@
+#Requires -Version 7.4
+
 # Finds what a pull request changed and sorts the changed files into groups the
 # workflow acts on. No LLM is involved: the same diff always gives the same answer.
 
 Import-Module "$PSScriptRoot/RepoPaths.psm1"
 
 function Assert-GitRef {
-    # A ref that starts with "-" would be read by git as an option.
+    <#
+    .SYNOPSIS
+        Fails unless the value is a plain git ref (branch, tag, SHA or origin/<branch>).
+    .DESCRIPTION
+        A ref that starts with "-" would be read by git as an option, so only letters,
+        digits and . _ / - are allowed, and the first character must be a letter or digit.
+    #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
@@ -45,7 +53,7 @@ function Get-ChangedFile {
     if ($LASTEXITCODE -ne 0) {
         throw "git diff $BaseRef...$HeadRef failed. Is the base branch fetched (fetch-depth: 0)?"
     }
-    @($files | Where-Object { -not [System.String]::IsNullOrWhiteSpace($_) })
+    return [string[]] @($files | Where-Object { -not [System.String]::IsNullOrWhiteSpace($_) })
 }
 
 function Get-ModuleAtRef {
@@ -72,7 +80,7 @@ function Get-ModuleAtRef {
     if ($LASTEXITCODE -ne 0) {
         throw "git ls-tree $Ref failed."
     }
-    @($entries | Where-Object { -not [System.String]::IsNullOrWhiteSpace($_) })
+    return [string[]] @($entries | Where-Object { -not [System.String]::IsNullOrWhiteSpace($_) })
 }
 
 function Group-ChangedFile {
@@ -124,7 +132,7 @@ function Group-ChangedFile {
         }
     }
 
-    [ordered]@{
+    return [ordered]@{
         modules      = @($modules)
         removed      = @($removed)
         out_of_scope = @($outOfScope)

@@ -1,3 +1,5 @@
+#Requires -Version 7.4
+
 <#
 .SYNOPSIS
     The verify job: checks the agent's result and patch, then runs the tests itself.
@@ -119,8 +121,10 @@ $verification = [ordered]@{
 }
 $verification | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $OutputDir 'verification.json') -Encoding utf8
 
-Write-Host ''
-Write-Host "Verdict: $verdict (can commit: $($verification.can_commit))"
+Write-Host @"
+
+Verdict: $verdict (can commit: $($verification.can_commit))
+"@
 foreach ($message in @($resultCheck.Errors) + @($patchCheck.Errors) + $warnings) {
     Write-Host "  - $message"
 }

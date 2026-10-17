@@ -1,3 +1,5 @@
+#Requires -Version 7.4
+
 # The patch with the agent's changes: how it is made in the agent job, and how the
 # verify job checks it before anything is committed. The patch is rejected as a whole
 # when any rule is broken: an agent that broke a rule is not trusted with the rest.
@@ -17,7 +19,13 @@ $script:SecretPatterns = [ordered]@{
 }
 
 function New-PatchCheck {
-    # The result of Test-AgentPatch.
+    <#
+    .SYNOPSIS
+        Builds the result object of Test-AgentPatch.
+    .OUTPUTS
+        An object with IsValid, Errors and Files (the paths in the patch).
+    #>
+    [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Builds an object in memory; changes no system state.')]
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
@@ -32,7 +40,7 @@ function New-PatchCheck {
         [string[]] $Files
     )
 
-    [pscustomobject]@{
+    return [pscustomobject]@{
         IsValid = $IsValid
         Errors  = $Errors
         Files   = $Files
@@ -60,7 +68,7 @@ function Save-WorkspaceBaseline {
     if ($LASTEXITCODE -ne 0) {
         throw 'git write-tree failed.'
     }
-    $tree.Trim()
+    return $tree.Trim()
 }
 
 function Export-AgentPatch {
@@ -163,7 +171,7 @@ function Get-PatchChange {
         }
     }
 
-    [pscustomobject]@{
+    return [pscustomobject]@{
         Files      = $files.ToArray()
         AddedLines = $added.ToArray()
     }
@@ -244,7 +252,7 @@ function Test-AgentPatch {
     }
 
     $paths = @($changes.Files | Where-Object { -not [System.String]::IsNullOrWhiteSpace($_.Path) } | ForEach-Object { $_.Path })
-    New-PatchCheck -IsValid ($errors.Count -eq 0) -Errors $errors.ToArray() -Files $paths
+    return New-PatchCheck -IsValid ($errors.Count -eq 0) -Errors $errors.ToArray() -Files $paths
 }
 
 Export-ModuleMember -Function Save-WorkspaceBaseline, Export-AgentPatch, Get-PatchChange, Test-AgentPatch

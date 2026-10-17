@@ -1,3 +1,5 @@
+#Requires -Version 7.4
+
 # Turns `terraform test -json` output into a result object, decides the result
 # status and prints or saves the result. The functions here only work on data
 # (no Docker, no git), so they are easy to test.
@@ -7,6 +9,7 @@ function New-TestResult {
     .SYNOPSIS
         Returns an empty result for one module. Every field of the result JSON is defined here.
     #>
+    [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Builds an object in memory; changes no system state.')]
     [CmdletBinding()]
     [OutputType([System.Collections.Specialized.OrderedDictionary])]
     param(
@@ -14,7 +17,7 @@ function New-TestResult {
         [string] $ModulePath
     )
 
-    [ordered]@{
+    return [ordered]@{
         module            = $ModulePath
         status            = 'error'   # passed | failed | error | no_tests
         formatting_ok     = $null     # $null = not checked
@@ -104,7 +107,7 @@ function ConvertFrom-TerraformTestJson {
         $errorList = @($errorList[0..($maxErrors - 1)]) + "... $($errorList.Count - $maxErrors) more lines cut."
     }
 
-    [pscustomobject]@{
+    return [pscustomobject]@{
         Runs    = $runs.ToArray()
         Errors  = $errorList
         Summary = $summary
@@ -145,7 +148,7 @@ function Get-TestStatus {
     if ($RunCount -gt 0) {
         return 'failed'
     }
-    'error'
+    return 'error'
 }
 
 function Write-TestResult {
@@ -172,11 +175,14 @@ function Write-TestResult {
         'not checked'
     }
 
-    Write-Host ''
-    Write-Host "Module:     $($Result.module)"
-    Write-Host "Status:     $($Result.status)"
-    Write-Host "Formatting: $formatting"
-    Write-Host "Summary:    $($Result.summary.passed) passed, $($Result.summary.failed) failed, $($Result.summary.errored) errored, $($Result.summary.skipped) skipped"
+    # The closing "@ of a here-string must start the line, so its text is not indented.
+    Write-Host @"
+
+Module:     $($Result.module)
+Status:     $($Result.status)
+Formatting: $formatting
+Summary:    $($Result.summary.passed) passed, $($Result.summary.failed) failed, $($Result.summary.errored) errored, $($Result.summary.skipped) skipped
+"@
     foreach ($run in $Result.runs) {
         # PadRight keeps the run names in one column: [pass ], [fail ], [error].
         Write-Host "  [$($run.status.PadRight(5))] $($run.file) :: $($run.run)"

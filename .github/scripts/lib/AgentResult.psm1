@@ -1,3 +1,5 @@
+#Requires -Version 7.4
+
 # Everything about the result the test agent returns. The agent is an LLM, so its
 # result is checked like any other untrusted input before the pipeline uses it.
 
@@ -79,7 +81,7 @@ function Test-AgentResult {
         }
     }
 
-    [pscustomobject]@{
+    return [pscustomobject]@{
         IsValid = ($errors.Count -eq 0)
         Errors  = $errors.ToArray()
         Result  = $result
@@ -133,7 +135,7 @@ function Compare-AgentClaim {
         }
     }
 
-    $warnings.ToArray()
+    return $warnings.ToArray()
 }
 
 Export-ModuleMember -Function Test-AgentResult, Compare-AgentClaim

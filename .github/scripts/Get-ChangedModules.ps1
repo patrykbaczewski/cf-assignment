@@ -1,3 +1,5 @@
+#Requires -Version 7.4
+
 <#
 .SYNOPSIS
     Prints, as JSON, which Terraform modules a branch changed compared with its base.

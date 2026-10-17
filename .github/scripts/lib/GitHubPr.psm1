@@ -1,3 +1,5 @@
+#Requires -Version 7.4
+
 # Writes to the pull request: the comment and the commit with verified tests.
 # Only the publish job uses these functions. It has write access, runs no LLM and no
 # code from the pull request.
@@ -9,7 +11,12 @@ $script:BotName = 'github-actions[bot]'
 $script:BotEmail = '41898282+github-actions[bot]@users.noreply.github.com'
 
 function Assert-PullRequestTarget {
-    # Fails unless the repository is owner/name and the number is a pull request number.
+    <#
+    .SYNOPSIS
+        Fails unless the repository is owner/name and the number is a pull request number.
+    .DESCRIPTION
+        Both values become part of GitHub API paths, so they are checked before use.
+    #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
@@ -28,7 +35,13 @@ function Assert-PullRequestTarget {
 }
 
 function New-PushResult {
-    # The result of Publish-TestCommit.
+    <#
+    .SYNOPSIS
+        Builds the result object of Publish-TestCommit.
+    .OUTPUTS
+        An object with CommitSha (or $null) and Error (or $null).
+    #>
+    [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Builds an object in memory; changes no system state.')]
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $false)]
@@ -38,7 +51,7 @@ function New-PushResult {
         [string] $ErrorMessage
     )
 
-    [pscustomobject]@{
+    return [pscustomobject]@{
         CommitSha = $CommitSha
         Error     = $ErrorMessage
     }
@@ -51,11 +64,12 @@ function Set-PrComment {
     .DESCRIPTION
         The comment is found by its hidden marker, and only among comments written by
         the workflow's bot, so the job never edits a comment written by a person.
-        Uses the GitHub CLI (gh) with the token in GH_TOKEN.
+        Uses the GitHub CLI (gh) with the token in GH_TOKEN. Supports -WhatIf: the
+        comments are read, but nothing is written.
     .OUTPUTS
-        The URL of the comment.
+        The URL of the comment, or $null with -WhatIf.
     #>
-    [CmdletBinding()]
+    [CmdletBinding(SupportsShouldProcess = $true)]
     param(
         [Parameter(Mandatory = $true)]
         [string] $Repository,
@@ -80,6 +94,10 @@ function Set-PrComment {
         Where-Object { $_.user.login -eq $script:BotName -and $_.body.Contains($Marker) } |
         Select-Object -Last 1
 
+    if (-not $PSCmdlet.ShouldProcess("$Repository#$PullRequest", 'Create or update the agent comment')) {
+        return $null
+    }
+
     # The body goes through a file, so no part of it is read as a command-line option.
     $bodyFile = New-TemporaryFile
     try {
@@ -97,7 +115,7 @@ function Set-PrComment {
         if ($LASTEXITCODE -ne 0) {
             throw 'Could not write the pull request comment.'
         }
-        ($response | ConvertFrom-Json).html_url
+        return ($response | ConvertFrom-Json).html_url
     }
     finally {
         Remove-Item -LiteralPath $bodyFile -Force -ErrorAction SilentlyContinue
@@ -159,7 +177,7 @@ function Publish-TestCommit {
     if ($LASTEXITCODE -ne 0) {
         return New-PushResult -ErrorMessage 'The push was rejected, probably because the branch changed during the run. Push again to re-run the agent.'
     }
-    New-PushResult -CommitSha $sha
+    return New-PushResult -CommitSha $sha
 }
 
 Export-ModuleMember -Function Set-PrComment, Publish-TestCommit

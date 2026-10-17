@@ -1,3 +1,5 @@
+#Requires -Version 7.4
+
 <#
 .SYNOPSIS
     Runs `terraform test` for one module inside a locked-down Docker container.

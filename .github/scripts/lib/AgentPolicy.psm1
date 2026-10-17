@@ -1,3 +1,5 @@
+#Requires -Version 7.4
+
 # What the test agent may do with its tools. The agent's instructions ask it to stay
 # within these limits; this module enforces them, because an LLM can be wrong or be
 # steered by text in the code it reads.
@@ -9,7 +11,13 @@ Import-Module "$PSScriptRoot/RepoPaths.psm1"
 $script:TestCommandPattern = '^pwsh -File \.github/scripts/Invoke-TerraformTest\.ps1 -ModulePath (modules/[a-z0-9-]+)\z'
 
 function New-PolicyDecision {
-    # One decision of the policy: allowed or not, and why.
+    <#
+    .SYNOPSIS
+        Builds one decision of the policy: allowed or not, and why.
+    .OUTPUTS
+        An object with Allowed and Reason.
+    #>
+    [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Builds an object in memory; changes no system state.')]
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
@@ -19,14 +27,21 @@ function New-PolicyDecision {
         [string] $Reason
     )
 
-    [pscustomobject]@{
+    return [pscustomobject]@{
         Allowed = $Allowed
         Reason  = $Reason
     }
 }
 
 function Test-SymbolicLinkOnPath {
-    # True when the file or any folder between the repository root and it is a link.
+    <#
+    .SYNOPSIS
+        Returns $true when the file, or any folder between the repository root and it,
+        is a symbolic link.
+    .DESCRIPTION
+        A link inside the repository could point a write at a file outside the tests
+        folder, even when the path itself looks like a test file.
+    #>
     [CmdletBinding()]
     [OutputType([bool])]
     param(
@@ -45,7 +60,7 @@ function Test-SymbolicLinkOnPath {
             return $true
         }
     }
-    $false
+    return $false
 }
 
 function Test-AgentToolUse {

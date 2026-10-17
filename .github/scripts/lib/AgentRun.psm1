@@ -1,3 +1,5 @@
+#Requires -Version 7.4
+
 # Starting the test agent (Claude Code) and reading what happened in its session.
 
 Import-Module "$PSScriptRoot/RepoPaths.psm1"
@@ -11,6 +13,7 @@ function New-AgentTaskPrompt {
         are reviewed like code. Lists the files of each module, because the agent cannot
         list folders itself (its shell is limited to the test command).
     #>
+    [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Builds an object in memory; changes no system state.')]
     [CmdletBinding()]
     [OutputType([string])]
     param(
@@ -42,10 +45,11 @@ function New-AgentTaskPrompt {
         'There is no diff: analyze each module as a whole and add the tests it is missing.'
     }
 
-    (Get-Content -LiteralPath $TemplatePath -Raw).
+    $prompt = (Get-Content -LiteralPath $TemplatePath -Raw).
     Replace('{{MODULES}}', [System.String]::Join(', ', @($Module))).
     Replace('{{FILES}}', [System.String]::Join("`n", @($files))).
     Replace('{{CHANGE}}', $change)
+    return $prompt
 }
 
 function Read-AgentTranscript {
@@ -69,7 +73,7 @@ function Read-AgentTranscript {
                     $_ | ConvertFrom-Json
                 }
                 catch {
-                    # A line that is not JSON is skipped.
+                    Write-Verbose 'Skipped a transcript line that is not JSON.'
                 }
             })
     }
@@ -109,7 +113,7 @@ function Read-AgentTranscript {
         $null
     }
 
-    [pscustomobject]@{
+    return [pscustomobject]@{
         Result = $result
         Stats  = $stats
     }
@@ -171,7 +175,7 @@ function Invoke-TestAgentSession {
     try {
         # The prompt goes through standard input, which also ends the input for claude.
         $Prompt | & claude @arguments > $TranscriptPath
-        $LASTEXITCODE
+        return $LASTEXITCODE
     }
     finally {
         Pop-Location

@@ -1,3 +1,5 @@
+#Requires -Version 7.4
+
 <#
 .SYNOPSIS
     The agent job: runs the test agent on the given modules and collects its output.
@@ -91,5 +93,7 @@ if ($session.Result) {
 
 Export-AgentPatch -RepoRoot $repoRoot -Baseline $baseline -PatchPath (Join-Path $OutputDir 'agent.patch')
 
-Write-Host ''
-Write-Host "Agent finished: outcome=$($session.Stats.outcome) exit=$exitCode turns=$($session.Stats.turns) duration=$($session.Stats.duration_s)s blocked=$($session.Stats.blocked) result=$([bool]$session.Result)"
+Write-Host @"
+
+Agent finished: outcome=$($session.Stats.outcome) exit=$exitCode turns=$($session.Stats.turns) duration=$($session.Stats.duration_s)s blocked=$($session.Stats.blocked) result=$([bool]$session.Result)
+"@

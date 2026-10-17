@@ -11,6 +11,9 @@
       exit 2  the tool use is blocked; the message on standard error goes back to the agent
 
     The script fails closed: if anything goes wrong, the tool use is blocked.
+    That is also why it has no #Requires line: a failed #Requires ends a script with
+    exit code 1, which Claude Code treats as a non-blocking error. The modules it
+    imports require PowerShell 7.4 instead; that failure is caught below and blocks.
 
     Optional environment variables, set by the workflow:
       TF_AGENT_MODULES    comma-separated modules of this task, for example modules/a,modules/b
@@ -25,7 +28,7 @@ try {
     $toolUse = [Console]::In.ReadToEnd() | ConvertFrom-Json
 
     $allowedModule = @()
-    if (-not [System.String]::IsNullOrWhiteSpace($env:TF_AGENT_MODULES)) {
+    if (Test-Path -Path env:TF_AGENT_MODULES) {
         $allowedModule = @($env:TF_AGENT_MODULES -split ',' | ForEach-Object { $_.Trim() } | Where-Object { -not [System.String]::IsNullOrWhiteSpace($_) })
     }
 

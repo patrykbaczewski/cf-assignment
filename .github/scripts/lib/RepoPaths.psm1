@@ -1,3 +1,5 @@
+#Requires -Version 7.4
+
 # Knowledge about the layout of this repository: where things live and which
 # paths are allowed. Path rules are defined here once, so every script and hook
 # that checks a path applies the same rule.
@@ -12,7 +14,7 @@ function Get-RepoRoot {
     param()
 
     # This file lives in .github/scripts/lib.
-    (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
+    return (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
 }
 
 function ConvertTo-ModulePath {
@@ -34,7 +36,7 @@ function ConvertTo-ModulePath {
     if ($normalized -notmatch '^modules/[a-z0-9-]+$') {
         throw "A module path must look like modules/<name>, got '$Path'."
     }
-    $normalized
+    return $normalized
 }
 
 function Get-ModulePathFromFile {
@@ -52,10 +54,10 @@ function Get-ModulePathFromFile {
     )
 
     if ($FilePath -match '^modules/([a-z0-9-]+)/') {
-        "modules/$($Matches[1])"
+        return "modules/$($Matches[1])"
     }
     else {
-        $null
+        return $null
     }
 }
 
@@ -111,7 +113,7 @@ function Resolve-RepoRelativePath {
     if (-not $full.StartsWith($root, [System.StringComparison]::Ordinal)) {
         return $null
     }
-    $full.Substring($root.Length) -replace '\\', '/'
+    return $full.Substring($root.Length) -replace '\\', '/'
 }
 
 function Test-AgentWritablePath {
@@ -142,7 +144,7 @@ function Test-AgentWritablePath {
     if ($AllowedModule -and $Matches[1] -notin $AllowedModule) {
         return $false
     }
-    $true
+    return $true
 }
 
 Export-ModuleMember -Function Get-RepoRoot, ConvertTo-ModulePath, Get-ModulePathFromFile, Assert-NoSymbolicLink, Resolve-RepoRelativePath, Test-AgentWritablePath

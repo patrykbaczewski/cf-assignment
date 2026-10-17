@@ -1,3 +1,5 @@
+#Requires -Version 7.4
+
 <#
 .SYNOPSIS
     The publish job: commits verified tests to the pull request and updates the comment.
