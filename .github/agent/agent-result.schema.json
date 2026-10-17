@@ -1,0 +1,125 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "agent-result.schema.json",
+  "title": "Terraform test agent result",
+  "description": "What the test agent returns at the end of a run. The pipeline reads only this; free text from the agent is ignored.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["summary", "modules", "findings", "limitations"],
+  "properties": {
+    "summary": {
+      "description": "Two or three sentences for the top of the pull request comment.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 600
+    },
+    "modules": {
+      "description": "One entry for every module the agent was asked to look at.",
+      "type": "array",
+      "maxItems": 20,
+      "items": { "$ref": "#/definitions/moduleResult" }
+    },
+    "findings": {
+      "description": "Things a reviewer should know about the infrastructure code. The agent reports them and never changes that code.",
+      "type": "array",
+      "maxItems": 30,
+      "items": { "$ref": "#/definitions/finding" }
+    },
+    "limitations": {
+      "description": "What the tests of this run cannot show.",
+      "type": "array",
+      "maxItems": 10,
+      "items": { "type": "string", "minLength": 1, "maxLength": 300 }
+    }
+  },
+  "definitions": {
+    "modulePath": {
+      "type": "string",
+      "pattern": "^modules/[a-z0-9-]+$"
+    },
+    "moduleResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["module", "decision", "reason", "test_files", "covered_behaviours", "final_test_status"],
+      "properties": {
+        "module": { "$ref": "#/definitions/modulePath" },
+        "decision": {
+          "description": "tests_added: new test file(s). tests_updated: existing test file(s) changed. no_tests_needed: the change needs no new tests. skipped: the agent could not work on the module.",
+          "enum": ["tests_added", "tests_updated", "no_tests_needed", "skipped"]
+        },
+        "reason": {
+          "description": "Why the agent made this decision.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "test_files": {
+          "description": "Test files the agent created or changed. Only test files are allowed.",
+          "type": "array",
+          "maxItems": 5,
+          "items": {
+            "type": "string",
+            "pattern": "^modules/[a-z0-9-]+/tests/[a-z0-9_-]+\\.tftest\\.hcl$"
+          }
+        },
+        "covered_behaviours": {
+          "description": "What the tests check, in plain words, one behaviour per item.",
+          "type": "array",
+          "maxItems": 20,
+          "items": { "type": "string", "minLength": 1, "maxLength": 200 }
+        },
+        "final_test_status": {
+          "description": "The agent's own claim about its last test run. The verify job runs the tests again and compares.",
+          "enum": ["passed", "failed", "error", "no_tests", "not_run"]
+        }
+      }
+    },
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["severity", "category", "module", "file", "line", "title", "detail", "recommendation", "introduced_by_change", "suggested_test"],
+      "properties": {
+        "severity": {
+          "description": "high: likely security or outage risk. medium: a real risk under some conditions. low: a weakness worth fixing. info: worth knowing, no action needed.",
+          "enum": ["high", "medium", "low", "info"]
+        },
+        "category": {
+          "enum": ["security", "reliability", "correctness", "maintainability"]
+        },
+        "module": { "$ref": "#/definitions/modulePath" },
+        "file": {
+          "description": "File that shows the problem, relative to the repository root.",
+          "type": "string",
+          "pattern": "^modules/[a-z0-9-]+/[A-Za-z0-9._/-]+$"
+        },
+        "line": {
+          "description": "Line in that file where the evidence is.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "title": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "detail": {
+          "description": "What is wrong and why it matters.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 800
+        },
+        "recommendation": {
+          "description": "What a person could change. The agent does not make the change.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "introduced_by_change": {
+          "description": "true when the change under review added or changed this problem; false when it existed before.",
+          "type": "boolean"
+        },
+        "suggested_test": {
+          "description": "A test that fails on the current code and would pass once it is fixed, or null. It is shown to reviewers, never committed.",
+          "type": ["string", "null"],
+          "maxLength": 2000
+        }
+      }
+    }
+  }
+}

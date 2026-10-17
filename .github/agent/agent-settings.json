@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pwsh -File .github/scripts/Invoke-TerraformTest.ps1 -ModulePath modules/*)",
+      "Skill"
+    ],
+    "deny": [
+      "WebFetch",
+      "WebSearch",
+      "Agent",
+      "NotebookEdit"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "pwsh -NoProfile -NonInteractive -File \"$CLAUDE_PROJECT_DIR/.github/scripts/Assert-AgentToolUse.ps1\"",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

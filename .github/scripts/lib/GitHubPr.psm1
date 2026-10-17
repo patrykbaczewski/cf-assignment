@@ -1,0 +1,183 @@
+#Requires -Version 7.4
+
+# Writes to the pull request: the comment and the commit with verified tests.
+# Only the publish job uses these functions. It has write access, runs no LLM and no
+# code from the pull request.
+
+Import-Module "$PSScriptRoot/RepoPaths.psm1"
+
+# The identity GitHub uses for commits made with the workflow token.
+$script:BotName = 'github-actions[bot]'
+$script:BotEmail = '41898282+github-actions[bot]@users.noreply.github.com'
+
+function Assert-PullRequestTarget {
+    <#
+    .SYNOPSIS
+        Fails unless the repository is owner/name and the number is a pull request number.
+    .DESCRIPTION
+        Both values become part of GitHub API paths, so they are checked before use.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $Repository,
+
+        [Parameter(Mandatory = $true)]
+        [int] $PullRequest
+    )
+
+    if ($Repository -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$') {
+        throw "'$Repository' is not owner/name."
+    }
+    if ($PullRequest -lt 1) {
+        throw "'$PullRequest' is not a pull request number."
+    }
+}
+
+function New-PushResult {
+    <#
+    .SYNOPSIS
+        Builds the result object of Publish-TestCommit.
+    .OUTPUTS
+        An object with CommitSha (or $null) and Error (or $null).
+    #>
+    [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Builds an object in memory; changes no system state.')]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $false)]
+        [string] $CommitSha,
+
+        [Parameter(Mandatory = $false)]
+        [string] $ErrorMessage
+    )
+
+    return [pscustomobject]@{
+        CommitSha = $CommitSha
+        Error     = $ErrorMessage
+    }
+}
+
+function Set-PrComment {
+    <#
+    .SYNOPSIS
+        Updates the agent's comment on a pull request, or creates it on the first run.
+    .DESCRIPTION
+        The comment is found by its hidden marker, and only among comments written by
+        the workflow's bot, so the job never edits a comment written by a person.
+        Uses the GitHub CLI (gh) with the token in GH_TOKEN. Supports -WhatIf: the
+        comments are read, but nothing is written.
+    .OUTPUTS
+        The URL of the comment, or $null with -WhatIf.
+    #>
+    [CmdletBinding(SupportsShouldProcess = $true)]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $Repository,
+
+        [Parameter(Mandatory = $true)]
+        [int] $PullRequest,
+
+        [Parameter(Mandatory = $true)]
+        [string] $Body,
+
+        [Parameter(Mandatory = $true)]
+        [string] $Marker
+    )
+
+    Assert-PullRequestTarget -Repository $Repository -PullRequest $PullRequest
+
+    $comments = & gh api --paginate "repos/$Repository/issues/$PullRequest/comments" | ConvertFrom-Json
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Could not list the pull request comments.'
+    }
+    $existing = @($comments) |
+        Where-Object { $_.user.login -eq $script:BotName -and $_.body.Contains($Marker) } |
+        Select-Object -Last 1
+
+    if (-not $PSCmdlet.ShouldProcess("$Repository#$PullRequest", 'Create or update the agent comment')) {
+        return $null
+    }
+
+    # The body goes through a file, so no part of it is read as a command-line option.
+    $bodyFile = New-TemporaryFile
+    try {
+        $payload = @{
+            body = $Body
+        }
+        $payload | ConvertTo-Json | Set-Content -LiteralPath $bodyFile -Encoding utf8
+
+        $response = if ($existing) {
+            & gh api --method PATCH "repos/$Repository/issues/comments/$($existing.id)" --input $bodyFile
+        }
+        else {
+            & gh api --method POST "repos/$Repository/issues/$PullRequest/comments" --input $bodyFile
+        }
+        if ($LASTEXITCODE -ne 0) {
+            throw 'Could not write the pull request comment.'
+        }
+        return ($response | ConvertFrom-Json).html_url
+    }
+    finally {
+        Remove-Item -LiteralPath $bodyFile -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Publish-TestCommit {
+    <#
+    .SYNOPSIS
+        Commits the verified test files to the pull request branch and pushes them.
+    .DESCRIPTION
+        Applies the patch in a checkout of the pull request branch, commits only the
+        given files as github-actions[bot] and pushes. When someone pushed to the branch
+        in the meantime, the push fails and nothing is overwritten.
+    .OUTPUTS
+        An object with CommitSha (or $null) and Error (or $null).
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $RepoRoot,
+
+        [Parameter(Mandatory = $true)]
+        [string] $PatchPath,
+
+        # The test files to commit (from the verified patch).
+        [Parameter(Mandatory = $true)]
+        [string[]] $File,
+
+        [Parameter(Mandatory = $true)]
+        [string] $Branch,
+
+        [Parameter(Mandatory = $true)]
+        [string] $Message
+    )
+
+    if ($Branch -notmatch '^[A-Za-z0-9][A-Za-z0-9._/-]*$') {
+        throw "'$Branch' is not an allowed branch name."
+    }
+    foreach ($path in $File) {
+        if (-not (Test-AgentWritablePath -RelativePath $path)) {
+            throw "'$path' is not a test file."
+        }
+    }
+
+    & git -C $RepoRoot apply $PatchPath
+    if ($LASTEXITCODE -ne 0) {
+        return New-PushResult -ErrorMessage 'The verified patch does not apply to the pull request branch any more.'
+    }
+
+    & git -C $RepoRoot add -- $File
+    & git -C $RepoRoot -c "user.name=$script:BotName" -c "user.email=$script:BotEmail" commit --quiet -m $Message -- $File
+    if ($LASTEXITCODE -ne 0) {
+        throw 'git commit failed.'
+    }
+    $sha = (& git -C $RepoRoot rev-parse HEAD).Trim()
+
+    & git -C $RepoRoot push --quiet origin "HEAD:refs/heads/$Branch"
+    if ($LASTEXITCODE -ne 0) {
+        return New-PushResult -ErrorMessage 'The push was rejected, probably because the branch changed during the run. Push again to re-run the agent.'
+    }
+    return New-PushResult -CommitSha $sha
+}
+
+Export-ModuleMember -Function Set-PrComment, Publish-TestCommit
