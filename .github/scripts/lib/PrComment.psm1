@@ -338,10 +338,18 @@ function New-PrCommentBody {
                     $lines.Add('')
                     $lines.Add('  **A test that fails on the current code:**')
                     $lines.Add('')
-                    $lines.Add((ConvertTo-CodeBlock -Code $finding.suggested_test -Language 'hcl'))
+                    # Indented like the rest of the list item: a block at column 0 would
+                    # end the list and fall out of the details.
+                    $codeBlock = ConvertTo-CodeBlock -Code $finding.suggested_test -Language 'hcl'
+                    foreach ($codeLine in $codeBlock -split "`n") {
+                        $lines.Add("  $codeLine")
+                    }
                 }
                 $lines.Add('')
                 $lines.Add('  </details>')
+                # GitHub reads HTML up to the next blank line, so without it the next
+                # finding would be shown as raw text.
+                $lines.Add('')
             }
             $lines.Add('')
         }
