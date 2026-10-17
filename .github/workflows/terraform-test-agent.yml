@@ -7,7 +7,8 @@
 #   verify  -> checks the agent's output, runs the tests  (no LLM, no secret, read-only)
 #   publish -> commit + comment                           (no LLM, the only write access)
 #
-# Logic lives in the PowerShell scripts in .github/scripts; this file only calls them.
+# Logic lives in the PowerShell scripts in .github/scripts and in the action in
+# .github/actions/use-base-tooling; this file only calls them.
 # Values from the event are passed through env, never written into a script, so text
 # such as a branch name cannot inject commands.
 
@@ -48,29 +49,13 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      # The same step is in every job that runs our scripts on the pull request's
-      # checkout. It is repeated on purpose: a shared local action would be loaded from
-      # the pull request's own files, which is exactly what this step must not trust.
+      # Every job that runs our scripts on the pull request's checkout starts with this.
+      # The action is loaded from main on GitHub, not from this checkout (a local ./ path
+      # would be), so the pull request cannot change it.
       - name: Use the agent tooling from the base branch
-        shell: pwsh
-        env:
-          BASE_REF: ${{ github.base_ref }}
-        run: |
-          # A pull request may change the agent, its rules or these scripts. Its changes
-          # take effect after review and merge; until then the base branch versions run.
-          $ErrorActionPreference = 'Stop'
-          Remove-Item -Recurse -Force -LiteralPath .github, .claude, CLAUDE.md -ErrorAction SilentlyContinue
-          git checkout "origin/$env:BASE_REF" -- .github .claude CLAUDE.md
-          if ($LASTEXITCODE -ne 0) {
-            throw "The base branch has no agent tooling yet."
-          }
-          # Files Claude Code loads by itself, wherever they are: instructions, skills
-          # and MCP servers (commands started together with the agent).
-          $root = (Get-Location).Path
-          Get-ChildItem -Recurse -Force -File -Include CLAUDE.md, CLAUDE.local.md, .mcp.json |
-            Where-Object { $_.FullName -ne (Join-Path $root 'CLAUDE.md') } | Remove-Item -Force
-          Get-ChildItem -Recurse -Force -Directory -Filter .claude |
-            Where-Object { $_.FullName -ne (Join-Path $root '.claude') } | Remove-Item -Recurse -Force
+        uses: patrykbaczewski/cf-assignment/.github/actions/use-base-tooling@main
+        with:
+          base-ref: ${{ github.base_ref }}
 
       - name: Find the changed modules
         id: detect
@@ -102,21 +87,9 @@ jobs:
           persist-credentials: false
 
       - name: Use the agent tooling from the base branch
-        shell: pwsh
-        env:
-          BASE_REF: ${{ github.base_ref }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-          Remove-Item -Recurse -Force -LiteralPath .github, .claude, CLAUDE.md -ErrorAction SilentlyContinue
-          git checkout "origin/$env:BASE_REF" -- .github .claude CLAUDE.md
-          if ($LASTEXITCODE -ne 0) {
-            throw "The base branch has no agent tooling yet."
-          }
-          $root = (Get-Location).Path
-          Get-ChildItem -Recurse -Force -File -Include CLAUDE.md, CLAUDE.local.md, .mcp.json |
-            Where-Object { $_.FullName -ne (Join-Path $root 'CLAUDE.md') } | Remove-Item -Force
-          Get-ChildItem -Recurse -Force -Directory -Filter .claude |
-            Where-Object { $_.FullName -ne (Join-Path $root '.claude') } | Remove-Item -Recurse -Force
+        uses: patrykbaczewski/cf-assignment/.github/actions/use-base-tooling@main
+        with:
+          base-ref: ${{ github.base_ref }}
 
       - name: Install Claude Code
         shell: pwsh
@@ -161,21 +134,9 @@ jobs:
           persist-credentials: false
 
       - name: Use the agent tooling from the base branch
-        shell: pwsh
-        env:
-          BASE_REF: ${{ github.base_ref }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-          Remove-Item -Recurse -Force -LiteralPath .github, .claude, CLAUDE.md -ErrorAction SilentlyContinue
-          git checkout "origin/$env:BASE_REF" -- .github .claude CLAUDE.md
-          if ($LASTEXITCODE -ne 0) {
-            throw "The base branch has no agent tooling yet."
-          }
-          $root = (Get-Location).Path
-          Get-ChildItem -Recurse -Force -File -Include CLAUDE.md, CLAUDE.local.md, .mcp.json |
-            Where-Object { $_.FullName -ne (Join-Path $root 'CLAUDE.md') } | Remove-Item -Force
-          Get-ChildItem -Recurse -Force -Directory -Filter .claude |
-            Where-Object { $_.FullName -ne (Join-Path $root '.claude') } | Remove-Item -Recurse -Force
+        uses: patrykbaczewski/cf-assignment/.github/actions/use-base-tooling@main
+        with:
+          base-ref: ${{ github.base_ref }}
 
       - name: Get the agent's output
         continue-on-error: true

@@ -1,0 +1,11 @@
+# Settings for zizmor, the GitHub Actions security linter.
+rules:
+  unpinned-uses:
+    config:
+      policies:
+        # Our own action is used from main on purpose: every run must take the reviewed
+        # version of the base branch, not a pinned old one and never the pull request's
+        # (see .github/actions/use-base-tooling/action.yml).
+        "patrykbaczewski/cf-assignment/*": ref-pin
+        # Official GitHub actions are used by version tag.
+        "actions/*": ref-pin

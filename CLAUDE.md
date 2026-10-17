@@ -37,5 +37,6 @@ sandbox: a throw-away copy, no network, no secrets.
 | `.claude/agents/` | The Terraform test agent |
 | `.claude/skills/` | Reusable skills the agent (and people) use |
 | `.github/scripts/` | PowerShell automation; functions live in modules under `lib/` |
+| `.github/actions/use-base-tooling/` | The step that restores the agent tooling from the base branch |
 | `.github/agent/agent-result.schema.json` | The result the agent must return |
 | `.github/workflows/` | The pull request workflow |
