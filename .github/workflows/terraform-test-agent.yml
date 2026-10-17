@@ -1,0 +1,255 @@
+# Terraform test agent: for every pull request that changes a module, an AI agent adds
+# or updates `terraform test` files, the workflow runs the tests itself, commits verified
+# tests to the pull request and reports results and findings in one comment.
+#
+#   detect  -> which modules changed                      (no LLM, read-only)
+#   agent   -> Claude Code writes tests, reports findings (read-only, the only secret)
+#   verify  -> checks the agent's output, runs the tests  (no LLM, no secret, read-only)
+#   publish -> commit + comment                           (no LLM, the only write access)
+#
+# Logic lives in the PowerShell scripts in .github/scripts; this file only calls them.
+# Values from the event are passed through env, never written into a script, so text
+# such as a branch name cannot inject commands.
+
+name: Terraform test agent
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "modules/**"
+
+permissions: {}
+
+concurrency:
+  group: terraform-test-agent-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  AGENT_MODEL: claude-opus-5-5
+  CLAUDE_CODE_VERSION: 2.1.292
+
+jobs:
+  detect:
+    name: Detect changed modules
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      modules: ${{ steps.detect.outputs.modules }}
+      count: ${{ steps.detect.outputs.count }}
+    steps:
+      - name: Check out the pull request
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      # The same step is in every job that runs our scripts on the pull request's
+      # checkout. It is repeated on purpose: a shared local action would be loaded from
+      # the pull request's own files, which is exactly what this step must not trust.
+      - name: Use the agent tooling from the base branch
+        shell: pwsh
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          # A pull request may change the agent, its rules or these scripts. Its changes
+          # take effect after review and merge; until then the base branch versions run.
+          $ErrorActionPreference = 'Stop'
+          Remove-Item -Recurse -Force -LiteralPath .github, .claude, CLAUDE.md -ErrorAction SilentlyContinue
+          git checkout "origin/$env:BASE_REF" -- .github .claude CLAUDE.md
+          if ($LASTEXITCODE -ne 0) { throw "The base branch has no agent tooling yet." }
+          # Files Claude Code loads by itself, wherever they are: instructions, skills
+          # and MCP servers (commands started together with the agent).
+          $root = (Get-Location).Path
+          Get-ChildItem -Recurse -Force -File -Include CLAUDE.md, CLAUDE.local.md, .mcp.json |
+            Where-Object { $_.FullName -ne (Join-Path $root 'CLAUDE.md') } | Remove-Item -Force
+          Get-ChildItem -Recurse -Force -Directory -Filter .claude |
+            Where-Object { $_.FullName -ne (Join-Path $root '.claude') } | Remove-Item -Recurse -Force
+
+      - name: Find the changed modules
+        id: detect
+        shell: pwsh
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          $json = ./.github/scripts/Get-ChangedModules.ps1 -BaseRef "origin/$env:BASE_REF" -Compress
+          $json
+          $changes = $json | ConvertFrom-Json
+          "modules=$($changes.modules -join ',')" >> $env:GITHUB_OUTPUT
+          "count=$(@($changes.modules).Count)" >> $env:GITHUB_OUTPUT
+
+  agent:
+    name: Run the test agent
+    needs: detect
+    # Pull requests from forks get no secrets, so the agent runs only for this repository.
+    if: needs.detect.outputs.count != '0' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the pull request
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Use the agent tooling from the base branch
+        shell: pwsh
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Remove-Item -Recurse -Force -LiteralPath .github, .claude, CLAUDE.md -ErrorAction SilentlyContinue
+          git checkout "origin/$env:BASE_REF" -- .github .claude CLAUDE.md
+          if ($LASTEXITCODE -ne 0) { throw "The base branch has no agent tooling yet." }
+          $root = (Get-Location).Path
+          Get-ChildItem -Recurse -Force -File -Include CLAUDE.md, CLAUDE.local.md, .mcp.json |
+            Where-Object { $_.FullName -ne (Join-Path $root 'CLAUDE.md') } | Remove-Item -Force
+          Get-ChildItem -Recurse -Force -Directory -Filter .claude |
+            Where-Object { $_.FullName -ne (Join-Path $root '.claude') } | Remove-Item -Recurse -Force
+
+      - name: Install Claude Code
+        shell: pwsh
+        run: npm install --global --no-fund --no-audit "@anthropic-ai/claude-code@$env:CLAUDE_CODE_VERSION"
+
+      - name: Run the agent
+        shell: pwsh
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          DISABLE_AUTOUPDATER: "1"
+          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
+          BASE_REF: ${{ github.base_ref }}
+          MODULES: ${{ needs.detect.outputs.modules }}
+        run: |
+          ./.github/scripts/Invoke-TestAgent.ps1 -Modules $env:MODULES -BaseRef "origin/$env:BASE_REF" `
+            -Model $env:AGENT_MODEL -OutputDir "$env:RUNNER_TEMP/agent-output"
+
+      - name: Keep the agent's output
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: agent-output
+          path: ${{ runner.temp }}/agent-output
+          if-no-files-found: ignore
+          retention-days: 14
+
+  verify:
+    name: Verify the tests
+    needs: [detect, agent]
+    # Also when the agent failed or was skipped: the pull request's tests still run.
+    if: always() && needs.detect.result == 'success' && needs.detect.outputs.count != '0'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the pull request
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Use the agent tooling from the base branch
+        shell: pwsh
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Remove-Item -Recurse -Force -LiteralPath .github, .claude, CLAUDE.md -ErrorAction SilentlyContinue
+          git checkout "origin/$env:BASE_REF" -- .github .claude CLAUDE.md
+          if ($LASTEXITCODE -ne 0) { throw "The base branch has no agent tooling yet." }
+          $root = (Get-Location).Path
+          Get-ChildItem -Recurse -Force -File -Include CLAUDE.md, CLAUDE.local.md, .mcp.json |
+            Where-Object { $_.FullName -ne (Join-Path $root 'CLAUDE.md') } | Remove-Item -Force
+          Get-ChildItem -Recurse -Force -Directory -Filter .claude |
+            Where-Object { $_.FullName -ne (Join-Path $root '.claude') } | Remove-Item -Recurse -Force
+
+      - name: Get the agent's output
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: agent-output
+          path: ${{ runner.temp }}/agent-output
+
+      - name: Check the output and run the tests
+        shell: pwsh
+        env:
+          MODULES: ${{ needs.detect.outputs.modules }}
+        run: |
+          $agentOutput = "$env:RUNNER_TEMP/agent-output"
+          ./.github/scripts/Invoke-AgentVerification.ps1 -Modules $env:MODULES `
+            -ResultPath "$agentOutput/agent-result.json" -PatchPath "$agentOutput/agent.patch" `
+            -OutputDir "$env:RUNNER_TEMP/verification"
+
+      - name: Keep the verification
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: verification
+          path: ${{ runner.temp }}/verification
+          retention-days: 14
+
+  publish:
+    name: Publish to the pull request
+    needs: [detect, agent, verify]
+    # Pull requests from forks get a read-only token, so there is nothing to publish to.
+    if: always() && needs.verify.result == 'success' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write       # push the verified test files to the pull request branch
+      pull-requests: write  # create or update the agent's comment
+    steps:
+      # This job can write, so it runs only scripts from the base branch...
+      - name: Check out the tooling (base branch)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: tools
+          persist-credentials: false
+
+      # ...and uses the pull request only as the place to commit. The commit that was
+      # verified is checked out, so the push fails if the branch moved in the meantime.
+      - name: Check out the pull request (to commit to)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: pr
+          # Needed to push. This job uploads no artifacts, so the stored token cannot
+          # leak through one (the risk zizmor's artipacked rule is about).
+          persist-credentials: true
+
+      - name: Get the agent's output
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: agent-output
+          path: ${{ runner.temp }}/agent-output
+
+      - name: Get the verification
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: verification
+          path: ${{ runner.temp }}/verification
+
+      - name: Commit verified tests and update the comment
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          $agentOutput = "$env:RUNNER_TEMP/agent-output"
+          ./tools/.github/scripts/Publish-AgentResult.ps1 `
+            -VerificationDir "$env:RUNNER_TEMP/verification" `
+            -ResultPath "$agentOutput/agent-result.json" -PatchPath "$agentOutput/agent.patch" `
+            -AgentStatsPath "$agentOutput/agent-stats.json" `
+            -PullRequestDir "$env:GITHUB_WORKSPACE/pr" -PullRequest $env:PR_NUMBER `
+            -Branch $env:HEAD_REF -HeadSha $env:HEAD_SHA
