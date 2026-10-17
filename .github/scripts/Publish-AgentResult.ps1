@@ -96,7 +96,9 @@ if ($verification.can_commit) {
         Write-Host "Dry run: would commit $([System.String]::Join(', ', @($patchCheck.Files))) to $Branch"
     }
     else {
-        $message = "test: add or update Terraform tests (test agent)`n`nVerified by workflow run $runUrl"
+        # [skip ci]: GitHub creates no new run for this commit. It holds exactly the patch
+        # the verify job checked; without it, every agent commit starts another run.
+        $message = "test: add or update Terraform tests (test agent) [skip ci]`n`nVerified by workflow run $runUrl"
         $push = Publish-TestCommit -RepoRoot $PullRequestDir -PatchPath $PatchPath -File $patchCheck.Files -Branch $Branch -Message $message
         $commitSha = $push.CommitSha
         $pushError = $push.Error

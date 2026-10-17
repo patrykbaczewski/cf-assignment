@@ -13,21 +13,32 @@ people.
 
 Look for these while you read a module. Report only what you actually see.
 
+Each item has a fixed severity. Use it, so the same problem gets the same severity in
+every run. Do not raise or lower it because of other settings ("public access is also
+on, which makes this worse"): describe that in `detail` instead.
+
 **Security**
-- Public network access on by default (`public_network_access_enabled`, `public_network_enabled` default `true`).
-- Weak transport: TLS below 1.2, FTPS other than `Disabled` or `FtpsOnly`, HTTPS not enforced.
-- Network rules with `default_action = "Allow"`.
-- Roles broader than needed (Owner where Contributor or Reader would do).
-- Code that runs programs during plan: `data "external"`, `local-exec`.
-- Secrets in outputs without `sensitive = true`.
+
+| What you see | Severity |
+|---|---|
+| Weak transport: HTTPS not enforced, TLS below 1.2, FTPS other than `Disabled` or `FtpsOnly` (plain FTP allowed) | `high` |
+| A secret in an output without `sensitive = true` | `high` |
+| Public network access on by default (`public_network_access_enabled`, `public_network_enabled` default `true`) | `medium` |
+| Network rules with `default_action = "Allow"` | `medium` |
+| A role broader than needed (Owner where Contributor or Reader would do) | `medium` |
+| Code that runs programs during plan: `data "external"`, `local-exec` | `medium` |
 
 **Reliability and correctness**
-- Inputs with known limits but no `validation` (names, ranges, allowed values).
-- Values fixed in code that callers probably need to change (SKU, size, retention).
-- Results that change on every run (for example a revision read during plan).
-- Private endpoints without a private DNS zone group.
-- Diagnostic logs missing or incomplete.
-- Delete protection or retention turned off.
+
+| What you see | Severity |
+|---|---|
+| No diagnostic logs on a service that holds data or secrets | `medium` |
+| A private endpoint without a private DNS zone group | `medium` |
+| Delete protection or retention turned off | `medium` |
+| Diagnostic logs that leave out some categories | `low` |
+| An input with known limits but no `validation` (names, ranges, allowed values) | `low` |
+| A result that changes on every run (for example a revision read during plan) | `low` |
+| A value fixed in code that callers probably need to change (SKU, size, retention) | `info` |
 
 ## Rules
 
@@ -44,6 +55,8 @@ Look for these while you read a module. Report only what you actually see.
    current code (see the `tf-test-authoring` skill).
 
 ## Severity
+
+For a finding that matches no checklist item, choose with this table:
 
 | Severity | Use when |
 |---|---|
