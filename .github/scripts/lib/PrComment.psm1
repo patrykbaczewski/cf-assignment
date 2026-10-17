@@ -8,9 +8,25 @@ $script:Marker = '<!-- tf-test-agent -->'
 # GitHub rejects comments longer than 65536 characters.
 $script:MaxBodyLength = 60000
 
-$script:SeverityOrder = @{ high = 0; medium = 1; low = 2; info = 3 }
-$script:SeverityIcon = @{ high = '🔴'; medium = '🟠'; low = '🟡'; info = '🔵' }
-$script:StatusIcon = @{ passed = '✅'; failed = '❌'; error = '❌'; no_tests = '⚪'; not_run = '⚪' }
+$script:SeverityOrder = @{
+    high   = 0
+    medium = 1
+    low    = 2
+    info   = 3
+}
+$script:SeverityIcon = @{
+    high   = '🔴'
+    medium = '🟠'
+    low    = '🟡'
+    info   = '🔵'
+}
+$script:StatusIcon = @{
+    passed   = '✅'
+    failed   = '❌'
+    error    = '❌'
+    no_tests = '⚪'
+    not_run  = '⚪'
+}
 
 function Get-PrCommentMarker {
     <#
@@ -38,16 +54,21 @@ function ConvertTo-SafeMarkdown {
     [CmdletBinding()]
     [OutputType([string])]
     param(
+        [Parameter(Mandatory = $false)]
         [AllowNull()]
         [AllowEmptyString()]
         [string] $Text,
 
+        [Parameter(Mandatory = $false)]
         [int] $MaxLength = 1000,
 
+        [Parameter(Mandatory = $false)]
         [switch] $SingleLine
     )
 
-    if (-not $Text) { return '' }
+    if ([System.String]::IsNullOrWhiteSpace($Text)) {
+        return ''
+    }
 
     $safe = $Text
     if ($safe.Length -gt $MaxLength) {
@@ -73,12 +94,14 @@ function ConvertTo-CodeBlock {
     [CmdletBinding()]
     [OutputType([string])]
     param(
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory = $true)]
         [AllowEmptyString()]
         [string] $Code,
 
+        [Parameter(Mandatory = $false)]
         [string] $Language = '',
 
+        [Parameter(Mandatory = $false)]
         [int] $MaxLength = 3000
     )
 
@@ -91,19 +114,57 @@ function ConvertTo-CodeBlock {
 }
 
 function Get-Headline {
-    param([object] $Verification, [string] $CommitSha, [string] $PushError)
+    # The first line of the comment: what happened, in a few words.
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [object] $Verification,
 
-    switch ($Verification.verdict) {
-        'verified' {
-            if ($CommitSha) { return "✅ Tests added or updated, verified and committed ($($CommitSha.Substring(0, 7)))" }
-            if ($PushError) { return '⚠️ Tests verified, but the commit could not be pushed' }
-            if ($Verification.patch.files) { return '✅ Tests added or updated and verified (not committed)' }
-            return '✅ Verified: no test changes were needed, existing tests pass'
+        [Parameter(Mandatory = $false)]
+        [string] $CommitSha,
+
+        [Parameter(Mandatory = $false)]
+        [string] $PushError
+    )
+
+    if ($Verification.verdict -eq 'verified') {
+        if (-not [System.String]::IsNullOrWhiteSpace($CommitSha)) {
+            return "✅ Tests added or updated, verified and committed ($($CommitSha.Substring(0, 7)))"
         }
-        'tests_failed' { return '❌ Tests fail: nothing was committed' }
-        'rejected' { return "🛑 The agent's output was rejected: nothing was committed" }
-        default { return '⚠️ Unknown result' }
+        if (-not [System.String]::IsNullOrWhiteSpace($PushError)) {
+            return '⚠️ Tests verified, but the commit could not be pushed'
+        }
+        if ($Verification.patch.files) {
+            return '✅ Tests added or updated and verified (not committed)'
+        }
+        return '✅ Verified: no test changes were needed, existing tests pass'
     }
+    if ($Verification.verdict -eq 'tests_failed') {
+        return '❌ Tests fail: nothing was committed'
+    }
+    if ($Verification.verdict -eq 'rejected') {
+        return "🛑 The agent's output was rejected: nothing was committed"
+    }
+    '⚠️ Unknown result'
+}
+
+function Get-ModuleEntry {
+    # The agent's entry for one module, or $null.
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $false)]
+        [AllowNull()]
+        [object] $AgentResult,
+
+        [Parameter(Mandatory = $true)]
+        [string] $Module
+    )
+
+    if (-not $AgentResult) {
+        return $null
+    }
+    $AgentResult.modules | Where-Object { $_.module -eq $Module } | Select-Object -First 1
 }
 
 function New-PrCommentBody {
@@ -115,7 +176,8 @@ function New-PrCommentBody {
     .PARAMETER AgentResult
         The agent's result, or $null when it was missing or invalid.
     .PARAMETER RunInfo
-        Facts about the run: repository, commit, run_url, model, turns, duration_s.
+        Facts about the run: server_url, repository, commit, run_url, model, turns,
+        duration_s, blocked.
     .PARAMETER CommitSha
         The commit with the agent's tests, when one was pushed.
     .PARAMETER PushError
@@ -124,137 +186,187 @@ function New-PrCommentBody {
     [CmdletBinding()]
     [OutputType([string])]
     param(
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory = $true)]
         [object] $Verification,
 
+        [Parameter(Mandatory = $false)]
         [AllowNull()]
         [object] $AgentResult,
 
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory = $true)]
         [hashtable] $RunInfo,
 
+        [Parameter(Mandatory = $false)]
         [string] $CommitSha,
 
+        [Parameter(Mandatory = $false)]
         [string] $PushError
     )
 
     $lines = [System.Collections.Generic.List[string]]::new()
-    $add = { param($text) $lines.Add($text) }
 
-    & $add $script:Marker
-    & $add "## Terraform test agent"
-    & $add ''
-    & $add "**$(Get-Headline -Verification $Verification -CommitSha $CommitSha -PushError $PushError)**"
-    & $add ''
+    $lines.Add($script:Marker)
+    $lines.Add('## Terraform test agent')
+    $lines.Add('')
+    $lines.Add("**$(Get-Headline -Verification $Verification -CommitSha $CommitSha -PushError $PushError)**")
+    $lines.Add('')
 
     if ($AgentResult) {
-        & $add "> 🤖 $(ConvertTo-SafeMarkdown $AgentResult.summary -MaxLength 600 -SingleLine)"
-        & $add ''
+        $lines.Add("> 🤖 $(ConvertTo-SafeMarkdown -Text $AgentResult.summary -MaxLength 600 -SingleLine)")
+        $lines.Add('')
     }
 
     # --- Problems found by the checks (our own text, still escaped) ------------
-    $problems = @($Verification.agent_result.errors) + @($Verification.patch.errors) | Where-Object { $_ }
+    $problems = @($Verification.agent_result.errors) + @($Verification.patch.errors) | Where-Object { -not [System.String]::IsNullOrWhiteSpace($_) }
     if ($problems) {
-        & $add '### Why the output was rejected'
-        foreach ($problem in $problems) { & $add "- $(ConvertTo-SafeMarkdown $problem -MaxLength 300 -SingleLine)" }
-        & $add ''
+        $lines.Add('### Why the output was rejected')
+        foreach ($problem in $problems) {
+            $lines.Add("- $(ConvertTo-SafeMarkdown -Text $problem -MaxLength 300 -SingleLine)")
+        }
+        $lines.Add('')
     }
-    if ($PushError) {
-        & $add "> ⚠️ $(ConvertTo-SafeMarkdown $PushError -MaxLength 300 -SingleLine)"
-        & $add ''
+    if (-not [System.String]::IsNullOrWhiteSpace($PushError)) {
+        $lines.Add("> ⚠️ $(ConvertTo-SafeMarkdown -Text $PushError -MaxLength 300 -SingleLine)")
+        $lines.Add('')
     }
 
     # --- Modules ----------------------------------------------------------------
-    & $add '### Modules'
-    & $add '| Module | Agent decision | Tests (verified by the workflow) | Agent reported |'
-    & $add '|---|---|---|---|'
+    $lines.Add('### Modules')
+    $lines.Add('| Module | Agent decision | Tests (verified by the workflow) | Agent reported |')
+    $lines.Add('|---|---|---|---|')
     foreach ($test in $Verification.tests) {
-        $entry = if ($AgentResult) { $AgentResult.modules | Where-Object { $_.module -eq $test.module } | Select-Object -First 1 }
-        $decision = if ($entry) { "``$($entry.decision)``" } else { '—' }
-        $claimed = if ($entry) { "$($script:StatusIcon[$entry.final_test_status]) $($entry.final_test_status)" } else { '—' }
+        $entry = Get-ModuleEntry -AgentResult $AgentResult -Module $test.module
+        $decision = '—'
+        $claimed = '—'
+        if ($entry) {
+            $decision = "``$($entry.decision)``"
+            $claimed = "$($script:StatusIcon[$entry.final_test_status]) $($entry.final_test_status)"
+        }
         $verified = "$($script:StatusIcon[$test.status]) $($test.status): $($test.summary.passed) passed, $($test.summary.failed) failed"
-        & $add "| ``$($test.module)`` | $decision | $verified | $claimed |"
+        $lines.Add("| ``$($test.module)`` | $decision | $verified | $claimed |")
     }
-    & $add ''
+    $lines.Add('')
 
     foreach ($warning in $Verification.claim_warnings) {
-        & $add "> ⚠️ $(ConvertTo-SafeMarkdown $warning -MaxLength 300 -SingleLine)"
+        $lines.Add("> ⚠️ $(ConvertTo-SafeMarkdown -Text $warning -MaxLength 300 -SingleLine)")
     }
-    if ($Verification.claim_warnings) { & $add '' }
+    if ($Verification.claim_warnings) {
+        $lines.Add('')
+    }
 
     foreach ($test in $Verification.tests) {
-        $entry = if ($AgentResult) { $AgentResult.modules | Where-Object { $_.module -eq $test.module } | Select-Object -First 1 }
-        & $add "<details><summary>Details: $($test.module)</summary>"
-        & $add ''
+        $entry = Get-ModuleEntry -AgentResult $AgentResult -Module $test.module
+        $lines.Add("<details><summary>Details: $($test.module)</summary>")
+        $lines.Add('')
         if ($entry) {
-            & $add "**Why:** $(ConvertTo-SafeMarkdown $entry.reason -MaxLength 500 -SingleLine)"
-            & $add ''
+            $lines.Add("**Why:** $(ConvertTo-SafeMarkdown -Text $entry.reason -MaxLength 500 -SingleLine)")
+            $lines.Add('')
             if ($entry.covered_behaviours) {
-                & $add '**What the tests check:**'
-                foreach ($behaviour in $entry.covered_behaviours) { & $add "- $(ConvertTo-SafeMarkdown $behaviour -MaxLength 200 -SingleLine)" }
-                & $add ''
+                $lines.Add('**What the tests check:**')
+                foreach ($behaviour in $entry.covered_behaviours) {
+                    $lines.Add("- $(ConvertTo-SafeMarkdown -Text $behaviour -MaxLength 200 -SingleLine)")
+                }
+                $lines.Add('')
             }
         }
-        & $add '**Test runs (verify job):**'
-        foreach ($run in $test.runs) { & $add "- $($script:StatusIcon[$(if ($run.status -eq 'pass') { 'passed' } else { 'failed' })]) ``$($run.file)`` :: ``$($run.run)``" }
+        $lines.Add('**Test runs (verify job):**')
+        foreach ($run in $test.runs) {
+            $icon = if ($run.status -eq 'pass') {
+                $script:StatusIcon['passed']
+            }
+            else {
+                $script:StatusIcon['failed']
+            }
+            $lines.Add("- $icon ``$($run.file)`` :: ``$($run.run)``")
+        }
         # Terraform output can contain text from the pull request (error messages).
-        foreach ($message in $test.errors) { & $add "- ❌ $(ConvertTo-SafeMarkdown $message -MaxLength 400 -SingleLine)" }
-        & $add ''
-        & $add '</details>'
-        & $add ''
+        foreach ($message in $test.errors) {
+            $lines.Add("- ❌ $(ConvertTo-SafeMarkdown -Text $message -MaxLength 400 -SingleLine)")
+        }
+        $lines.Add('')
+        $lines.Add('</details>')
+        $lines.Add('')
     }
 
     # --- Findings -----------------------------------------------------------------
-    $findings = if ($AgentResult) { @($AgentResult.findings | Sort-Object { $script:SeverityOrder[$_.severity] }) } else { @() }
+    $findings = @()
+    if ($AgentResult) {
+        $findings = @($AgentResult.findings | Sort-Object { $script:SeverityOrder[$_.severity] })
+    }
     if ($findings) {
-        & $add '### Findings for reviewers'
-        & $add '_The agent reports these and does not change the infrastructure code. What to do about them is your decision._'
-        & $add ''
-        foreach ($group in @(
-                @{ Title = 'Introduced by this pull request'; Items = @($findings | Where-Object { $_.introduced_by_change }) },
-                @{ Title = 'Already in the code'; Items = @($findings | Where-Object { -not $_.introduced_by_change }) })) {
-            if (-not $group.Items) { continue }
-            & $add "#### $($group.Title)"
+        $lines.Add('### Findings for reviewers')
+        $lines.Add('_The agent reports these and does not change the infrastructure code. What to do about them is your decision._')
+        $lines.Add('')
+        $groups = @(
+            @{
+                Title = 'Introduced by this pull request'
+                Items = @($findings | Where-Object { $_.introduced_by_change })
+            }
+            @{
+                Title = 'Already in the code'
+                Items = @($findings | Where-Object { -not $_.introduced_by_change })
+            }
+        )
+        foreach ($group in $groups) {
+            if (-not $group.Items) {
+                continue
+            }
+            $lines.Add("#### $($group.Title)")
             foreach ($finding in $group.Items) {
                 # file and line are checked by the schema (a path pattern and an integer).
                 $link = "$($RunInfo.server_url)/$($RunInfo.repository)/blob/$($RunInfo.commit)/$($finding.file)#L$($finding.line)"
-                & $add "- $($script:SeverityIcon[$finding.severity]) **$($finding.severity)** · $($finding.category) · [``$($finding.file):$($finding.line)``]($link): $(ConvertTo-SafeMarkdown $finding.title -MaxLength 120 -SingleLine)"
-                & $add '  <details><summary>Details</summary>'
-                & $add ''
-                & $add "  $(ConvertTo-SafeMarkdown $finding.detail -MaxLength 800 -SingleLine)"
-                & $add ''
-                & $add "  **Recommendation:** $(ConvertTo-SafeMarkdown $finding.recommendation -MaxLength 500 -SingleLine)"
-                if ($finding.suggested_test) {
-                    & $add ''
-                    & $add '  **A test that fails on the current code:**'
-                    & $add ''
-                    & $add (ConvertTo-CodeBlock -Code $finding.suggested_test -Language 'hcl')
+                $title = ConvertTo-SafeMarkdown -Text $finding.title -MaxLength 120 -SingleLine
+                $lines.Add("- $($script:SeverityIcon[$finding.severity]) **$($finding.severity)** · $($finding.category) · [``$($finding.file):$($finding.line)``]($link): $title")
+                $lines.Add('  <details><summary>Details</summary>')
+                $lines.Add('')
+                $lines.Add("  $(ConvertTo-SafeMarkdown -Text $finding.detail -MaxLength 800 -SingleLine)")
+                $lines.Add('')
+                $lines.Add("  **Recommendation:** $(ConvertTo-SafeMarkdown -Text $finding.recommendation -MaxLength 500 -SingleLine)")
+                if (-not [System.String]::IsNullOrWhiteSpace($finding.suggested_test)) {
+                    $lines.Add('')
+                    $lines.Add('  **A test that fails on the current code:**')
+                    $lines.Add('')
+                    $lines.Add((ConvertTo-CodeBlock -Code $finding.suggested_test -Language 'hcl'))
                 }
-                & $add ''
-                & $add '  </details>'
+                $lines.Add('')
+                $lines.Add('  </details>')
             }
-            & $add ''
+            $lines.Add('')
         }
     }
 
     # --- Limits -------------------------------------------------------------------
     if ($AgentResult -and $AgentResult.limitations) {
-        & $add '### What these tests cannot show'
-        foreach ($limitation in $AgentResult.limitations) { & $add "- $(ConvertTo-SafeMarkdown $limitation -MaxLength 300 -SingleLine)" }
-        & $add ''
+        $lines.Add('### What these tests cannot show')
+        foreach ($limitation in $AgentResult.limitations) {
+            $lines.Add("- $(ConvertTo-SafeMarkdown -Text $limitation -MaxLength 300 -SingleLine)")
+        }
+        $lines.Add('')
     }
 
     # --- Run ----------------------------------------------------------------------
     $stats = @()
-    if ($RunInfo.model) { $stats += "model ``$($RunInfo.model)``" }
-    if ($RunInfo.turns) { $stats += "$($RunInfo.turns) turns" }
-    if ($RunInfo.duration_s) { $stats += "$($RunInfo.duration_s) s" }
-    if ($null -ne $RunInfo.blocked) { $stats += "$($RunInfo.blocked) tool uses blocked by policy" }
-    if ($RunInfo.run_url) { $stats += "[workflow run]($($RunInfo.run_url))" }
-    & $add '---'
-    & $add "<sub>Terraform test agent (Claude Code) · $($stats -join ' · ') · commit ``$("$($RunInfo.commit)".Substring(0, [Math]::Min(7, "$($RunInfo.commit)".Length)))``. The summary and findings are written by an AI; test results come from the workflow's own run.</sub>"
+    if (-not [System.String]::IsNullOrWhiteSpace($RunInfo.model)) {
+        $stats += "model ``$($RunInfo.model)``"
+    }
+    if ($RunInfo.turns) {
+        $stats += "$($RunInfo.turns) turns"
+    }
+    if ($RunInfo.duration_s) {
+        $stats += "$($RunInfo.duration_s) s"
+    }
+    if ($null -ne $RunInfo.blocked) {
+        $stats += "$($RunInfo.blocked) tool uses blocked by policy"
+    }
+    if (-not [System.String]::IsNullOrWhiteSpace($RunInfo.run_url)) {
+        $stats += "[workflow run]($($RunInfo.run_url))"
+    }
+    $commit = "$($RunInfo.commit)"
+    $shortCommit = $commit.Substring(0, [Math]::Min(7, $commit.Length))
+    $lines.Add('---')
+    $lines.Add("<sub>Terraform test agent (Claude Code) · $([System.String]::Join(' · ', @($stats))) · commit ``$shortCommit``. The summary and findings are written by an AI; test results come from the workflow's own run.</sub>")
 
-    $body = $lines -join "`n"
+    $body = [System.String]::Join("`n", @($lines))
     if ($body.Length -gt $script:MaxBodyLength) {
         $body = $body.Substring(0, $script:MaxBodyLength) + "`n`n… The comment was cut; see the workflow run for everything."
     }

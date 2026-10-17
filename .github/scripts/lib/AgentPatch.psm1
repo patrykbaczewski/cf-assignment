@@ -2,7 +2,7 @@
 # verify job checks it before anything is committed. The patch is rejected as a whole
 # when any rule is broken: an agent that broke a rule is not trusted with the rest.
 
-Import-Module (Join-Path $PSScriptRoot 'RepoPaths.psm1')
+Import-Module "$PSScriptRoot/RepoPaths.psm1"
 
 $script:MaxPatchBytes = 200KB
 
@@ -14,6 +14,29 @@ $script:SecretPatterns = [ordered]@{
     'AWS access key' = '\bAKIA[0-9A-Z]{16}\b'
     'Private key'    = '-----BEGIN [A-Z ]*PRIVATE KEY-----'
     'Slack token'    = '\bxox[abprs]-[A-Za-z0-9-]{10,}'
+}
+
+function New-PatchCheck {
+    # The result of Test-AgentPatch.
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [bool] $IsValid,
+
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [string[]] $Errors,
+
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [string[]] $Files
+    )
+
+    [pscustomobject]@{
+        IsValid = $IsValid
+        Errors  = $Errors
+        Files   = $Files
+    }
 }
 
 function Save-WorkspaceBaseline {
@@ -28,13 +51,15 @@ function Save-WorkspaceBaseline {
     [CmdletBinding()]
     [OutputType([string])]
     param(
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory = $true)]
         [string] $RepoRoot
     )
 
     & git -C $RepoRoot add --all
     $tree = & git -C $RepoRoot write-tree
-    if ($LASTEXITCODE -ne 0) { throw 'git write-tree failed.' }
+    if ($LASTEXITCODE -ne 0) {
+        throw 'git write-tree failed.'
+    }
     $tree.Trim()
 }
 
@@ -48,13 +73,13 @@ function Export-AgentPatch {
     #>
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory = $true)]
         [string] $RepoRoot,
 
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory = $true)]
         [string] $Baseline,
 
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory = $true)]
         [string] $PatchPath
     )
 
@@ -64,10 +89,17 @@ function Export-AgentPatch {
 
     & git -C $RepoRoot add --all
     $patch = & git -C $RepoRoot diff --cached --binary --no-renames --no-color $Baseline
-    if ($LASTEXITCODE -ne 0) { throw 'git diff failed.' }
+    if ($LASTEXITCODE -ne 0) {
+        throw 'git diff failed.'
+    }
 
     # Join with new lines ourselves: the output arrives as separate lines.
-    $text = if ($patch) { ($patch -join "`n") + "`n" } else { '' }
+    $text = if ($patch) {
+        [System.String]::Join("`n", @($patch)) + "`n"
+    }
+    else {
+        ''
+    }
     [System.IO.File]::WriteAllText($PatchPath, $text)
 }
 
@@ -76,11 +108,11 @@ function Get-PatchChange {
     .SYNOPSIS
         Lists the files in a patch, what happens to each, and every added line.
     .OUTPUTS
-        An object with Files (Path, Kind, Mode, Binary) and AddedLines.
+        An object with Files (Path, Header, Kind, Mode, Binary) and AddedLines.
     #>
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory = $true)]
         [AllowEmptyString()]
         [string] $PatchText
     )
@@ -93,18 +125,42 @@ function Get-PatchChange {
         if ($line.StartsWith('diff --git ')) {
             # A path with spaces or special characters is quoted by git and does not
             # match; it is recorded as unreadable and rejected later.
-            $path = if ($line -cmatch '^diff --git a/(\S+) b/(\S+)$') { $Matches[2] } else { $null }
-            $current = [pscustomobject]@{ Path = $path; Header = $line; Kind = 'modified'; Mode = '100644'; Binary = $false }
+            $path = $null
+            if ($line -cmatch '^diff --git a/(\S+) b/(\S+)$') {
+                $path = $Matches[2]
+            }
+            $current = [pscustomobject]@{
+                Path   = $path
+                Header = $line
+                Kind   = 'modified'
+                Mode   = '100644'
+                Binary = $false
+            }
             $files.Add($current)
             continue
         }
-        if (-not $current) { continue }
+        if (-not $current) {
+            continue
+        }
 
-        if ($line -match '^new file mode (\d+)') { $current.Kind = 'added'; $current.Mode = $Matches[1] }
-        elseif ($line -match '^deleted file mode (\d+)') { $current.Kind = 'deleted'; $current.Mode = $Matches[1] }
-        elseif ($line -match '^new mode (\d+)') { $current.Kind = 'mode-changed'; $current.Mode = $Matches[1] }
-        elseif ($line -match '^(GIT binary patch|Binary files )') { $current.Binary = $true }
-        elseif ($line.StartsWith('+') -and -not $line.StartsWith('+++ ')) { $added.Add($line.Substring(1)) }
+        if ($line -match '^new file mode (\d+)') {
+            $current.Kind = 'added'
+            $current.Mode = $Matches[1]
+        }
+        elseif ($line -match '^deleted file mode (\d+)') {
+            $current.Kind = 'deleted'
+            $current.Mode = $Matches[1]
+        }
+        elseif ($line -match '^new mode (\d+)') {
+            $current.Kind = 'mode-changed'
+            $current.Mode = $Matches[1]
+        }
+        elseif ($line -match '^(GIT binary patch|Binary files )') {
+            $current.Binary = $true
+        }
+        elseif ($line.StartsWith('+') -and -not $line.StartsWith('+++ ')) {
+            $added.Add($line.Substring(1))
+        }
     }
 
     [pscustomobject]@{
@@ -130,34 +186,35 @@ function Test-AgentPatch {
     #>
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory = $true)]
         [string] $PatchPath,
 
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory = $true)]
         [string] $RepoRoot,
 
         # The modules of this run; the patch may only touch their tests.
+        [Parameter(Mandatory = $false)]
         [string[]] $AllowedModule
     )
 
     $errors = [System.Collections.Generic.List[string]]::new()
 
     if (-not (Test-Path -LiteralPath $PatchPath -PathType Leaf)) {
-        return [pscustomobject]@{ IsValid = $false; Errors = @("Patch file '$PatchPath' does not exist."); Files = @() }
+        return New-PatchCheck -IsValid $false -Errors @("Patch file '$PatchPath' does not exist.") -Files @()
     }
 
     $size = (Get-Item -LiteralPath $PatchPath).Length
     if ($size -eq 0) {
-        return [pscustomobject]@{ IsValid = $true; Errors = @(); Files = @() }
+        return New-PatchCheck -IsValid $true -Errors @() -Files @()
     }
     if ($size -gt $script:MaxPatchBytes) {
-        return [pscustomobject]@{ IsValid = $false; Errors = @("The patch is $size bytes; the limit is $script:MaxPatchBytes."); Files = @() }
+        return New-PatchCheck -IsValid $false -Errors @("The patch is $size bytes; the limit is $script:MaxPatchBytes.") -Files @()
     }
 
     $changes = Get-PatchChange -PatchText (Get-Content -LiteralPath $PatchPath -Raw)
 
     foreach ($file in $changes.Files) {
-        if (-not $file.Path) {
+        if ([System.String]::IsNullOrWhiteSpace($file.Path)) {
             $errors.Add("Unreadable file header: $($file.Header)")
             continue
         }
@@ -183,14 +240,11 @@ function Test-AgentPatch {
 
     $check = & git -C $RepoRoot apply --check $PatchPath 2>&1
     if ($LASTEXITCODE -ne 0) {
-        $errors.Add("The patch does not apply cleanly: $($check -join ' ')")
+        $errors.Add("The patch does not apply cleanly: $([System.String]::Join(' ', @($check)))")
     }
 
-    [pscustomobject]@{
-        IsValid = ($errors.Count -eq 0)
-        Errors  = $errors.ToArray()
-        Files   = @($changes.Files | Where-Object { $_.Path } | ForEach-Object { $_.Path })
-    }
+    $paths = @($changes.Files | Where-Object { -not [System.String]::IsNullOrWhiteSpace($_.Path) } | ForEach-Object { $_.Path })
+    New-PatchCheck -IsValid ($errors.Count -eq 0) -Errors $errors.ToArray() -Files $paths
 }
 
 Export-ModuleMember -Function Save-WorkspaceBaseline, Export-AgentPatch, Get-PatchChange, Test-AgentPatch

@@ -19,38 +19,40 @@
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)]
+    [Parameter(Mandatory = $true)]
     [string] $VerificationDir,
 
-    [Parameter(Mandatory)]
+    [Parameter(Mandatory = $true)]
     [string] $ResultPath,
 
-    [Parameter(Mandatory)]
+    [Parameter(Mandatory = $true)]
     [string] $PatchPath,
 
-    # Optional JSON from the agent job: model, turns, duration_s.
+    # JSON from the agent job: model, turns, duration_s, blocked.
+    [Parameter(Mandatory = $false)]
     [string] $AgentStatsPath,
 
-    [Parameter(Mandatory)]
+    [Parameter(Mandatory = $true)]
     [string] $PullRequestDir,
 
-    [Parameter(Mandatory)]
+    [Parameter(Mandatory = $true)]
     [int] $PullRequest,
 
-    [Parameter(Mandatory)]
+    [Parameter(Mandatory = $true)]
     [string] $Branch,
 
-    [Parameter(Mandatory)]
+    [Parameter(Mandatory = $true)]
     [string] $HeadSha,
 
+    [Parameter(Mandatory = $false)]
     [switch] $DryRun
 )
 
 $ErrorActionPreference = 'Stop'
 
-Import-Module (Join-Path $PSScriptRoot 'lib/AgentPatch.psm1')
-Import-Module (Join-Path $PSScriptRoot 'lib/PrComment.psm1')
-Import-Module (Join-Path $PSScriptRoot 'lib/GitHubPr.psm1')
+Import-Module "$PSScriptRoot/lib/AgentPatch.psm1"
+Import-Module "$PSScriptRoot/lib/PrComment.psm1"
+Import-Module "$PSScriptRoot/lib/GitHubPr.psm1"
 
 $verification = Get-Content -LiteralPath (Join-Path $VerificationDir 'verification.json') -Raw | ConvertFrom-Json
 
@@ -60,13 +62,17 @@ if ($verification.agent_result.valid) {
     $agentResult = Get-Content -LiteralPath $ResultPath -Raw | ConvertFrom-Json
 }
 
+$runUrl = $null
+if (-not [System.String]::IsNullOrWhiteSpace($env:GITHUB_RUN_ID)) {
+    $runUrl = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
+}
 $runInfo = @{
     server_url = $env:GITHUB_SERVER_URL
     repository = $env:GITHUB_REPOSITORY
     commit     = $HeadSha
-    run_url    = if ($env:GITHUB_RUN_ID) { "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID" }
+    run_url    = $runUrl
 }
-if ($AgentStatsPath -and (Test-Path -LiteralPath $AgentStatsPath)) {
+if (-not [System.String]::IsNullOrWhiteSpace($AgentStatsPath) -and (Test-Path -LiteralPath $AgentStatsPath)) {
     $stats = Get-Content -LiteralPath $AgentStatsPath -Raw | ConvertFrom-Json
     $runInfo.model = $stats.model
     $runInfo.turns = $stats.turns
@@ -82,13 +88,13 @@ if ($verification.can_commit) {
     # Check again here instead of trusting the artifact from the verify job.
     $patchCheck = Test-AgentPatch -PatchPath $PatchPath -RepoRoot $PullRequestDir -AllowedModule @($verification.modules)
     if (-not $patchCheck.IsValid) {
-        throw "The patch failed the check in the publish job: $($patchCheck.Errors -join '; ')"
+        throw "The patch failed the check in the publish job: $([System.String]::Join('; ', @($patchCheck.Errors)))"
     }
     if ($DryRun) {
-        Write-Host "Dry run: would commit $($patchCheck.Files -join ', ') to $Branch"
+        Write-Host "Dry run: would commit $([System.String]::Join(', ', @($patchCheck.Files))) to $Branch"
     }
     else {
-        $message = "test: add or update Terraform tests (test agent)`n`nVerified by workflow run $($runInfo.run_url)"
+        $message = "test: add or update Terraform tests (test agent)`n`nVerified by workflow run $runUrl"
         $push = Publish-TestCommit -RepoRoot $PullRequestDir -PatchPath $PatchPath -File $patchCheck.Files -Branch $Branch -Message $message
         $commitSha = $push.CommitSha
         $pushError = $push.Error
@@ -99,7 +105,7 @@ if ($verification.can_commit) {
 
 $body = New-PrCommentBody -Verification $verification -AgentResult $agentResult -RunInfo $runInfo -CommitSha $commitSha -PushError $pushError
 
-if ($env:GITHUB_STEP_SUMMARY) {
+if (-not [System.String]::IsNullOrWhiteSpace($env:GITHUB_STEP_SUMMARY)) {
     $body | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Encoding utf8
 }
 
@@ -111,7 +117,7 @@ else {
     Write-Host "Comment: $url"
 }
 
-if ($verification.verdict -ne 'verified' -or $pushError) {
+if ($verification.verdict -ne 'verified' -or -not [System.String]::IsNullOrWhiteSpace($pushError)) {
     Write-Host "Verdict: $($verification.verdict)"
     exit 1
 }

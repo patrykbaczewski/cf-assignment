@@ -2,17 +2,46 @@
 # Only the publish job uses these functions. It has write access, runs no LLM and no
 # code from the pull request.
 
-Import-Module (Join-Path $PSScriptRoot 'RepoPaths.psm1')
+Import-Module "$PSScriptRoot/RepoPaths.psm1"
 
 # The identity GitHub uses for commits made with the workflow token.
 $script:BotName = 'github-actions[bot]'
 $script:BotEmail = '41898282+github-actions[bot]@users.noreply.github.com'
 
 function Assert-PullRequestTarget {
-    param([string] $Repository, [int] $PullRequest)
+    # Fails unless the repository is owner/name and the number is a pull request number.
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $Repository,
 
-    if ($Repository -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$') { throw "'$Repository' is not owner/name." }
-    if ($PullRequest -lt 1) { throw "'$PullRequest' is not a pull request number." }
+        [Parameter(Mandatory = $true)]
+        [int] $PullRequest
+    )
+
+    if ($Repository -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$') {
+        throw "'$Repository' is not owner/name."
+    }
+    if ($PullRequest -lt 1) {
+        throw "'$PullRequest' is not a pull request number."
+    }
+}
+
+function New-PushResult {
+    # The result of Publish-TestCommit.
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $false)]
+        [string] $CommitSha,
+
+        [Parameter(Mandatory = $false)]
+        [string] $ErrorMessage
+    )
+
+    [pscustomobject]@{
+        CommitSha = $CommitSha
+        Error     = $ErrorMessage
+    }
 }
 
 function Set-PrComment {
@@ -28,36 +57,46 @@ function Set-PrComment {
     #>
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory = $true)]
         [string] $Repository,
 
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory = $true)]
         [int] $PullRequest,
 
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory = $true)]
         [string] $Body,
 
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory = $true)]
         [string] $Marker
     )
 
     Assert-PullRequestTarget -Repository $Repository -PullRequest $PullRequest
 
     $comments = & gh api --paginate "repos/$Repository/issues/$PullRequest/comments" | ConvertFrom-Json
-    if ($LASTEXITCODE -ne 0) { throw 'Could not list the pull request comments.' }
-    $existing = @($comments) | Where-Object { $_.user.login -eq $script:BotName -and $_.body.Contains($Marker) } | Select-Object -Last 1
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Could not list the pull request comments.'
+    }
+    $existing = @($comments) |
+        Where-Object { $_.user.login -eq $script:BotName -and $_.body.Contains($Marker) } |
+        Select-Object -Last 1
 
     # The body goes through a file, so no part of it is read as a command-line option.
     $bodyFile = New-TemporaryFile
     try {
-        @{ body = $Body } | ConvertTo-Json | Set-Content -LiteralPath $bodyFile -Encoding utf8
+        $payload = @{
+            body = $Body
+        }
+        $payload | ConvertTo-Json | Set-Content -LiteralPath $bodyFile -Encoding utf8
+
         $response = if ($existing) {
             & gh api --method PATCH "repos/$Repository/issues/comments/$($existing.id)" --input $bodyFile
         }
         else {
             & gh api --method POST "repos/$Repository/issues/$PullRequest/comments" --input $bodyFile
         }
-        if ($LASTEXITCODE -ne 0) { throw 'Could not write the pull request comment.' }
+        if ($LASTEXITCODE -ne 0) {
+            throw 'Could not write the pull request comment.'
+        }
         ($response | ConvertFrom-Json).html_url
     }
     finally {
@@ -78,41 +117,49 @@ function Publish-TestCommit {
     #>
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory = $true)]
         [string] $RepoRoot,
 
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory = $true)]
         [string] $PatchPath,
 
         # The test files to commit (from the verified patch).
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory = $true)]
         [string[]] $File,
 
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory = $true)]
         [string] $Branch,
 
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory = $true)]
         [string] $Message
     )
 
-    if ($Branch -notmatch '^[A-Za-z0-9][A-Za-z0-9._/-]*$') { throw "'$Branch' is not an allowed branch name." }
+    if ($Branch -notmatch '^[A-Za-z0-9][A-Za-z0-9._/-]*$') {
+        throw "'$Branch' is not an allowed branch name."
+    }
     foreach ($path in $File) {
-        if (-not (Test-AgentWritablePath -RelativePath $path)) { throw "'$path' is not a test file." }
+        if (-not (Test-AgentWritablePath -RelativePath $path)) {
+            throw "'$path' is not a test file."
+        }
     }
 
     & git -C $RepoRoot apply $PatchPath
-    if ($LASTEXITCODE -ne 0) { return [pscustomobject]@{ CommitSha = $null; Error = 'The verified patch does not apply to the pull request branch any more.' } }
+    if ($LASTEXITCODE -ne 0) {
+        return New-PushResult -ErrorMessage 'The verified patch does not apply to the pull request branch any more.'
+    }
 
     & git -C $RepoRoot add -- $File
     & git -C $RepoRoot -c "user.name=$script:BotName" -c "user.email=$script:BotEmail" commit --quiet -m $Message -- $File
-    if ($LASTEXITCODE -ne 0) { throw 'git commit failed.' }
+    if ($LASTEXITCODE -ne 0) {
+        throw 'git commit failed.'
+    }
     $sha = (& git -C $RepoRoot rev-parse HEAD).Trim()
 
     & git -C $RepoRoot push --quiet origin "HEAD:refs/heads/$Branch"
     if ($LASTEXITCODE -ne 0) {
-        return [pscustomobject]@{ CommitSha = $null; Error = 'The push was rejected, probably because the branch changed during the run. Push again to re-run the agent.' }
+        return New-PushResult -ErrorMessage 'The push was rejected, probably because the branch changed during the run. Push again to re-run the agent.'
     }
-    [pscustomobject]@{ CommitSha = $sha; Error = $null }
+    New-PushResult -CommitSha $sha
 }
 
 Export-ModuleMember -Function Set-PrComment, Publish-TestCommit

@@ -19,14 +19,14 @@
 $ErrorActionPreference = 'Stop'
 
 try {
-    Import-Module (Join-Path $PSScriptRoot 'lib/RepoPaths.psm1')
-    Import-Module (Join-Path $PSScriptRoot 'lib/AgentPolicy.psm1')
+    Import-Module "$PSScriptRoot/lib/RepoPaths.psm1"
+    Import-Module "$PSScriptRoot/lib/AgentPolicy.psm1"
 
     $toolUse = [Console]::In.ReadToEnd() | ConvertFrom-Json
 
     $allowedModule = @()
-    if ($env:TF_AGENT_MODULES) {
-        $allowedModule = @($env:TF_AGENT_MODULES -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    if (-not [System.String]::IsNullOrWhiteSpace($env:TF_AGENT_MODULES)) {
+        $allowedModule = @($env:TF_AGENT_MODULES -split ',' | ForEach-Object { $_.Trim() } | Where-Object { -not [System.String]::IsNullOrWhiteSpace($_) })
     }
 
     $decision = Test-AgentToolUse -ToolName $toolUse.tool_name -ToolInput $toolUse.tool_input `

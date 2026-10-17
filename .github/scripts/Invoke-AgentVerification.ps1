@@ -25,27 +25,27 @@
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)]
+    [Parameter(Mandatory = $true)]
     [string] $ResultPath,
 
-    [Parameter(Mandatory)]
+    [Parameter(Mandatory = $true)]
     [string] $PatchPath,
 
-    [Parameter(Mandatory)]
+    [Parameter(Mandatory = $true)]
     [string] $Modules,
 
-    [Parameter(Mandatory)]
+    [Parameter(Mandatory = $true)]
     [string] $OutputDir
 )
 
 $ErrorActionPreference = 'Stop'
 
-Import-Module (Join-Path $PSScriptRoot 'lib/RepoPaths.psm1')
-Import-Module (Join-Path $PSScriptRoot 'lib/AgentResult.psm1')
-Import-Module (Join-Path $PSScriptRoot 'lib/AgentPatch.psm1')
+Import-Module "$PSScriptRoot/lib/RepoPaths.psm1"
+Import-Module "$PSScriptRoot/lib/AgentResult.psm1"
+Import-Module "$PSScriptRoot/lib/AgentPatch.psm1"
 
 $repoRoot = Get-RepoRoot
-$moduleList = @($Modules -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ } | ForEach-Object { ConvertTo-ModulePath -Path $_ })
+$moduleList = @($Modules -split ',' | ForEach-Object { $_.Trim() } | Where-Object { -not [System.String]::IsNullOrWhiteSpace($_) } | ForEach-Object { ConvertTo-ModulePath -Path $_ })
 New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
 
 # --- 1 and 2: the agent's result and patch -------------------------------------
@@ -58,7 +58,9 @@ $patchCheck = Test-AgentPatch -PatchPath $PatchPath -RepoRoot $repoRoot -Allowed
 $patchApplied = $false
 if ($resultCheck.IsValid -and $patchCheck.IsValid -and $patchCheck.Files.Count -gt 0) {
     & git -C $repoRoot apply $PatchPath
-    if ($LASTEXITCODE -ne 0) { throw 'git apply failed after git apply --check passed.' }
+    if ($LASTEXITCODE -ne 0) {
+        throw 'git apply failed after git apply --check passed.'
+    }
     $patchApplied = $true
 }
 
@@ -67,36 +69,51 @@ if ($resultCheck.IsValid -and $patchCheck.IsValid -and $patchCheck.Files.Count -
 
 $tests = foreach ($module in $moduleList) {
     $resultFile = Join-Path $OutputDir ("test-result-" + ($module -replace '/', '-') + '.json')
-    & pwsh -NoProfile -File (Join-Path $PSScriptRoot 'Invoke-TerraformTest.ps1') -ModulePath $module -ResultPath $resultFile | Out-Host
+    & pwsh -NoProfile -File "$PSScriptRoot/Invoke-TerraformTest.ps1" -ModulePath $module -ResultPath $resultFile | Out-Host
     Get-Content -LiteralPath $resultFile -Raw | ConvertFrom-Json
 }
 $tests = @($tests)
 
 # --- 5: compare claims with facts ----------------------------------------------
-
 # Only meaningful when the patch was accepted: a rejected patch was not applied, so its
 # tests could not have run.
+
 $warnings = @()
 if ($resultCheck.IsValid -and $patchCheck.IsValid) {
     $verifiedStatus = @{}
-    foreach ($test in $tests) { $verifiedStatus[$test.module] = $test.status }
+    foreach ($test in $tests) {
+        $verifiedStatus[$test.module] = $test.status
+    }
     $warnings = @(Compare-AgentClaim -Result $resultCheck.Result -VerifiedStatus $verifiedStatus -PatchFile $patchCheck.Files)
 }
 
 # --- Verdict -------------------------------------------------------------------
 
 $testsOk = -not ($tests | Where-Object { $_.status -notin 'passed', 'no_tests' })
-$verdict =
-if (-not $resultCheck.IsValid -or -not $patchCheck.IsValid) { 'rejected' }
-elseif ($testsOk) { 'verified' }
-else { 'tests_failed' }
+$verdict = if (-not $resultCheck.IsValid -or -not $patchCheck.IsValid) {
+    'rejected'
+}
+elseif ($testsOk) {
+    'verified'
+}
+else {
+    'tests_failed'
+}
 
 $verification = [ordered]@{
     verdict        = $verdict
     can_commit     = ($verdict -eq 'verified' -and $patchApplied)
     modules        = $moduleList
-    agent_result   = [ordered]@{ valid = $resultCheck.IsValid; errors = @($resultCheck.Errors) }
-    patch          = [ordered]@{ valid = $patchCheck.IsValid; errors = @($patchCheck.Errors); files = @($patchCheck.Files); applied = $patchApplied }
+    agent_result   = [ordered]@{
+        valid  = $resultCheck.IsValid
+        errors = @($resultCheck.Errors)
+    }
+    patch          = [ordered]@{
+        valid   = $patchCheck.IsValid
+        errors  = @($patchCheck.Errors)
+        files   = @($patchCheck.Files)
+        applied = $patchApplied
+    }
     tests          = $tests
     claim_warnings = $warnings
 }

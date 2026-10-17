@@ -1,7 +1,7 @@
 # Everything about the result the test agent returns. The agent is an LLM, so its
 # result is checked like any other untrusted input before the pipeline uses it.
 
-Import-Module (Join-Path $PSScriptRoot 'RepoPaths.psm1')
+Import-Module "$PSScriptRoot/RepoPaths.psm1"
 
 function Test-AgentResult {
     <#
@@ -19,19 +19,25 @@ function Test-AgentResult {
     #>
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory = $true)]
         [string] $Path,
 
+        [Parameter(Mandatory = $false)]
         [string] $SchemaPath = (Join-Path (Get-RepoRoot) '.github/agent/agent-result.schema.json'),
 
         # The modules the agent was asked to look at (from the detect job).
+        [Parameter(Mandatory = $false)]
         [string[]] $AllowedModule
     )
 
     $errors = [System.Collections.Generic.List[string]]::new()
 
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
-        return [pscustomobject]@{ IsValid = $false; Errors = @("Result file '$Path' does not exist."); Result = $null }
+        return [pscustomobject]@{
+            IsValid = $false
+            Errors  = @("Result file '$Path' does not exist.")
+            Result  = $null
+        }
     }
     $json = Get-Content -LiteralPath $Path -Raw
 
@@ -42,7 +48,11 @@ function Test-AgentResult {
         foreach ($schemaError in $schemaErrors) {
             $errors.Add("Schema: $($schemaError.Exception.Message)")
         }
-        return [pscustomobject]@{ IsValid = $false; Errors = $errors.ToArray(); Result = $null }
+        return [pscustomobject]@{
+            IsValid = $false
+            Errors  = $errors.ToArray()
+            Result  = $null
+        }
     }
 
     $result = $json | ConvertFrom-Json
@@ -89,15 +99,15 @@ function Compare-AgentClaim {
     [CmdletBinding()]
     [OutputType([string[]])]
     param(
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory = $true)]
         [object] $Result,
 
-        # Test status per module from the verify job, for example @{ 'modules/x' = 'passed' }.
-        [Parameter(Mandatory)]
+        # Test status per module from the verify job, for example 'modules/x' -> 'passed'.
+        [Parameter(Mandatory = $true)]
         [hashtable] $VerifiedStatus,
 
         # Files in the agent's patch.
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory = $true)]
         [AllowEmptyCollection()]
         [string[]] $PatchFile
     )
@@ -106,12 +116,12 @@ function Compare-AgentClaim {
 
     foreach ($entry in $Result.modules) {
         $verified = $VerifiedStatus[$entry.module]
-        if ($verified -and $entry.final_test_status -ne 'not_run' -and $entry.final_test_status -ne $verified) {
+        if (-not [System.String]::IsNullOrWhiteSpace($verified) -and $entry.final_test_status -ne 'not_run' -and $entry.final_test_status -ne $verified) {
             $warnings.Add("$($entry.module): the agent reported '$($entry.final_test_status)', the verify job found '$verified'.")
         }
     }
 
-    $claimedFiles = @($Result.modules | ForEach-Object { $_.test_files } | Where-Object { $_ })
+    $claimedFiles = @($Result.modules | ForEach-Object { $_.test_files } | Where-Object { -not [System.String]::IsNullOrWhiteSpace($_) })
     foreach ($file in $PatchFile) {
         if ($file -notin $claimedFiles) {
             $warnings.Add("'$file' was changed but the agent did not report it.")

@@ -27,35 +27,42 @@
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)]
+    [Parameter(Mandatory = $true)]
     [string] $Modules,
 
+    [Parameter(Mandatory = $false)]
     [string] $BaseRef,
 
+    [Parameter(Mandatory = $false)]
     [string] $Model = 'claude-opus-5-5',
 
-    [Parameter(Mandatory)]
+    [Parameter(Mandatory = $true)]
     [string] $OutputDir
 )
 
 $ErrorActionPreference = 'Stop'
 
-Import-Module (Join-Path $PSScriptRoot 'lib/RepoPaths.psm1')
-Import-Module (Join-Path $PSScriptRoot 'lib/GitChanges.psm1')
-Import-Module (Join-Path $PSScriptRoot 'lib/AgentPatch.psm1')
-Import-Module (Join-Path $PSScriptRoot 'lib/AgentRun.psm1')
+Import-Module "$PSScriptRoot/lib/RepoPaths.psm1"
+Import-Module "$PSScriptRoot/lib/GitChanges.psm1"
+Import-Module "$PSScriptRoot/lib/AgentPatch.psm1"
+Import-Module "$PSScriptRoot/lib/AgentRun.psm1"
 
 $repoRoot = Get-RepoRoot
-$moduleList = @($Modules -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ } | ForEach-Object { ConvertTo-ModulePath -Path $_ })
+$moduleList = @($Modules -split ',' | ForEach-Object { $_.Trim() } | Where-Object { -not [System.String]::IsNullOrWhiteSpace($_) } | ForEach-Object { ConvertTo-ModulePath -Path $_ })
 New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
 
 # --- 1. Input, outside the repository ------------------------------------------
-$tempRoot = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { [System.IO.Path]::GetTempPath() }
+$tempRoot = if (-not [System.String]::IsNullOrWhiteSpace($env:RUNNER_TEMP)) {
+    $env:RUNNER_TEMP
+}
+else {
+    [System.IO.Path]::GetTempPath()
+}
 $inputDir = Join-Path $tempRoot 'agent-input'
 New-Item -ItemType Directory -Path $inputDir -Force | Out-Null
 
 $diffPath = $null
-if ($BaseRef) {
+if (-not [System.String]::IsNullOrWhiteSpace($BaseRef)) {
     $diffPath = Join-Path $inputDir 'changes.diff'
     Export-ModuleDiff -RepoRoot $repoRoot -BaseRef $BaseRef -Module $moduleList -Path $diffPath
 }
@@ -69,7 +76,7 @@ $prompt | Set-Content -LiteralPath (Join-Path $OutputDir 'agent-task.md') -Encod
 $baseline = Save-WorkspaceBaseline -RepoRoot $repoRoot
 $transcript = Join-Path $OutputDir 'agent-transcript.jsonl'
 
-Write-Host "Running the agent ($Model) on: $($moduleList -join ', ')"
+Write-Host "Running the agent ($Model) on: $([System.String]::Join(', ', @($moduleList)))"
 $exitCode = Invoke-TestAgentSession -RepoRoot $repoRoot -Prompt $prompt -Model $Model `
     -Module $moduleList -InputDir $inputDir -TranscriptPath $transcript
 

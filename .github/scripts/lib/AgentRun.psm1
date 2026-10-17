@@ -1,6 +1,6 @@
 # Starting the test agent (Claude Code) and reading what happened in its session.
 
-Import-Module (Join-Path $PSScriptRoot 'RepoPaths.psm1')
+Import-Module "$PSScriptRoot/RepoPaths.psm1"
 
 function New-AgentTaskPrompt {
     <#
@@ -14,16 +14,17 @@ function New-AgentTaskPrompt {
     [CmdletBinding()]
     [OutputType([string])]
     param(
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory = $true)]
         [string] $TemplatePath,
 
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory = $true)]
         [string] $RepoRoot,
 
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory = $true)]
         [string[]] $Module,
 
         # File with the diff of the pull request, or empty when there is none.
+        [Parameter(Mandatory = $false)]
         [string] $DiffPath
     )
 
@@ -34,7 +35,7 @@ function New-AgentTaskPrompt {
             ForEach-Object { '- ' + (Resolve-RepoRelativePath -Path $_.FullName -RepoRoot $RepoRoot) }
     }
 
-    $change = if ($DiffPath) {
+    $change = if (-not [System.String]::IsNullOrWhiteSpace($DiffPath)) {
         "The diff of this pull request against its base branch, limited to these modules, is in:`n$DiffPath`nRead it before you analyze the modules."
     }
     else {
@@ -42,8 +43,8 @@ function New-AgentTaskPrompt {
     }
 
     (Get-Content -LiteralPath $TemplatePath -Raw).
-    Replace('{{MODULES}}', ($Module -join ', ')).
-    Replace('{{FILES}}', ($files -join "`n")).
+    Replace('{{MODULES}}', [System.String]::Join(', ', @($Module))).
+    Replace('{{FILES}}', [System.String]::Join("`n", @($files))).
     Replace('{{CHANGE}}', $change)
 }
 
@@ -57,14 +58,19 @@ function Read-AgentTranscript {
     #>
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory = $true)]
         [string] $Path
     )
 
     $events = @()
     if (Test-Path -LiteralPath $Path) {
         $events = @(Get-Content -LiteralPath $Path | ForEach-Object {
-                try { $_ | ConvertFrom-Json } catch { }
+                try {
+                    $_ | ConvertFrom-Json
+                }
+                catch {
+                    # A line that is not JSON is skipped.
+                }
             })
     }
 
@@ -77,17 +83,35 @@ function Read-AgentTranscript {
     $events | Where-Object { $_.type -eq 'user' } | ForEach-Object { $_.message.content } |
         Where-Object { $_.type -eq 'tool_result' -and "$($_.content)" -match 'Blocked by the agent policy' } |
         ForEach-Object { [void] $blockedIds.Add($_.tool_use_id) }
-    if ($final) { $final.permission_denials | ForEach-Object { [void] $blockedIds.Add($_.tool_use_id) } }
+
+    $stats = [ordered]@{
+        model      = $null
+        turns      = $null
+        duration_s = $null
+        outcome    = 'no_result'
+        blocked    = 0
+    }
+    if ($init) {
+        $stats.model = $init.model
+    }
+    if ($final) {
+        $final.permission_denials | ForEach-Object { [void] $blockedIds.Add($_.tool_use_id) }
+        $stats.turns = $final.num_turns
+        $stats.duration_s = [int]($final.duration_ms / 1000)
+        $stats.outcome = $final.subtype
+    }
+    $stats.blocked = $blockedIds.Count
+
+    $result = if ($final) {
+        $final.structured_output
+    }
+    else {
+        $null
+    }
 
     [pscustomobject]@{
-        Result = if ($final) { $final.structured_output } else { $null }
-        Stats  = [ordered]@{
-            model      = if ($init) { $init.model } else { $null }
-            turns      = if ($final) { $final.num_turns } else { $null }
-            duration_s = if ($final) { [int]($final.duration_ms / 1000) } else { $null }
-            outcome    = if ($final) { $final.subtype } else { 'no_result' }
-            blocked    = $blockedIds.Count
-        }
+        Result = $result
+        Stats  = $stats
     }
 }
 
@@ -105,22 +129,22 @@ function Invoke-TestAgentSession {
     #>
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory = $true)]
         [string] $RepoRoot,
 
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory = $true)]
         [string] $Prompt,
 
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory = $true)]
         [string] $Model,
 
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory = $true)]
         [string[]] $Module,
 
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory = $true)]
         [string] $InputDir,
 
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory = $true)]
         [string] $TranscriptPath
     )
 
@@ -141,7 +165,7 @@ function Invoke-TestAgentSession {
         '--verbose'
     )
 
-    $env:TF_AGENT_MODULES = $Module -join ','
+    $env:TF_AGENT_MODULES = [System.String]::Join(',', @($Module))
     $env:TF_AGENT_INPUT_DIR = $InputDir
     Push-Location $RepoRoot
     try {

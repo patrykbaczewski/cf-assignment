@@ -25,7 +25,7 @@ function ConvertTo-ModulePath {
     [CmdletBinding()]
     [OutputType([string])]
     param(
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory = $true)]
         [string] $Path
     )
 
@@ -47,7 +47,7 @@ function Get-ModulePathFromFile {
     [CmdletBinding()]
     [OutputType([string])]
     param(
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory = $true)]
         [string] $FilePath
     )
 
@@ -69,13 +69,13 @@ function Assert-NoSymbolicLink {
     #>
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory = $true)]
         [string] $Path
     )
 
-    $links = Get-ChildItem -LiteralPath $Path -Recurse -Force | Where-Object { $_.LinkType }
+    $links = Get-ChildItem -LiteralPath $Path -Recurse -Force | Where-Object { -not [System.String]::IsNullOrWhiteSpace($_.LinkType) }
     if ($links) {
-        throw "'$Path' contains symbolic links, which are not allowed: $($links.FullName -join ', ')"
+        throw "'$Path' contains symbolic links, which are not allowed: $([System.String]::Join(', ', @($links.FullName)))"
     }
 }
 
@@ -93,10 +93,10 @@ function Resolve-RepoRelativePath {
     [CmdletBinding()]
     [OutputType([string])]
     param(
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory = $true)]
         [string] $Path,
 
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory = $true)]
         [string] $RepoRoot
     )
 
@@ -128,10 +128,11 @@ function Test-AgentWritablePath {
     [CmdletBinding()]
     [OutputType([bool])]
     param(
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory = $true)]
         [string] $RelativePath,
 
         # When given, only these modules (modules/<name>) may be written.
+        [Parameter(Mandatory = $false)]
         [string[]] $AllowedModule
     )
 

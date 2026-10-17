@@ -18,11 +18,16 @@ function New-SandboxCopy {
     [CmdletBinding()]
     [OutputType([string])]
     param(
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory = $true)]
         [string] $SourcePath
     )
 
-    $tempRoot = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { [System.IO.Path]::GetTempPath() }
+    $tempRoot = if (-not [System.String]::IsNullOrWhiteSpace($env:RUNNER_TEMP)) {
+        $env:RUNNER_TEMP
+    }
+    else {
+        [System.IO.Path]::GetTempPath()
+    }
     $workDir = Join-Path $tempRoot "$script:WorkDirPrefix$([guid]::NewGuid().ToString('N'))"
 
     Copy-Item -LiteralPath $SourcePath -Destination $workDir -Recurse
@@ -39,7 +44,7 @@ function Remove-SandboxCopy {
     #>
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory = $true)]
         [string] $Path
     )
 
@@ -63,12 +68,13 @@ function Invoke-TerraformInSandbox {
     #>
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory = $true)]
         [string] $WorkDir,
 
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory = $true)]
         [string[]] $TerraformArgs,
 
+        [Parameter(Mandatory = $false)]
         [switch] $AllowNetwork
     )
 

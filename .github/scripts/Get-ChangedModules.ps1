@@ -23,18 +23,20 @@
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)]
+    [Parameter(Mandatory = $true)]
     [string] $BaseRef,
 
+    [Parameter(Mandatory = $false)]
     [string] $HeadRef = 'HEAD',
 
+    [Parameter(Mandatory = $false)]
     [switch] $Compress
 )
 
 $ErrorActionPreference = 'Stop'
 
-Import-Module (Join-Path $PSScriptRoot 'lib/RepoPaths.psm1')
-Import-Module (Join-Path $PSScriptRoot 'lib/GitChanges.psm1')
+Import-Module "$PSScriptRoot/lib/RepoPaths.psm1"
+Import-Module "$PSScriptRoot/lib/GitChanges.psm1"
 
 $repoRoot = Get-RepoRoot
 # @(...) keeps an empty result an empty list; without it PowerShell turns it into $null.

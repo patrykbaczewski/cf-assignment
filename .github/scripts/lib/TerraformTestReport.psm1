@@ -10,7 +10,7 @@ function New-TestResult {
     [CmdletBinding()]
     [OutputType([System.Collections.Specialized.OrderedDictionary])]
     param(
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory = $true)]
         [string] $ModulePath
     )
 
@@ -19,7 +19,12 @@ function New-TestResult {
         status            = 'error'   # passed | failed | error | no_tests
         formatting_ok     = $null     # $null = not checked
         unformatted_files = @()
-        summary           = [ordered]@{ passed = 0; failed = 0; errored = 0; skipped = 0 }
+        summary           = [ordered]@{
+            passed  = 0
+            failed  = 0
+            errored = 0
+            skipped = 0
+        }
         runs              = @()
         errors            = @()
     }
@@ -34,7 +39,7 @@ function ConvertFrom-TerraformTestJson {
     #>
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory = $true)]
         [AllowEmptyCollection()]
         [AllowEmptyString()]
         [string[]] $Line
@@ -42,7 +47,12 @@ function ConvertFrom-TerraformTestJson {
 
     $runs = [System.Collections.Generic.List[object]]::new()
     $errors = [System.Collections.Generic.List[string]]::new()
-    $summary = [ordered]@{ passed = 0; failed = 0; errored = 0; skipped = 0 }
+    $summary = [ordered]@{
+        passed  = 0
+        failed  = 0
+        errored = 0
+        skipped = 0
+    }
 
     foreach ($text in $Line) {
         try {
@@ -50,7 +60,9 @@ function ConvertFrom-TerraformTestJson {
         }
         catch {
             # Not every line is JSON, for example a crash message.
-            if ($text -match '\S') { $errors.Add($text) }
+            if (-not [System.String]::IsNullOrWhiteSpace($text)) {
+                $errors.Add($text)
+            }
             continue
         }
 
@@ -66,9 +78,14 @@ function ConvertFrom-TerraformTestJson {
             }
             'diagnostic' {
                 if ($entry.diagnostic.severity -eq 'error') {
-                    $where = (@($entry.'@testfile', $entry.'@testrun') | Where-Object { $_ }) -join ' :: '
+                    $where = [System.String]::Join(' :: ', @(@($entry.'@testfile', $entry.'@testrun') | Where-Object { -not [System.String]::IsNullOrWhiteSpace($_) }))
                     $message = "$($entry.diagnostic.summary). $($entry.diagnostic.detail)".Trim()
-                    $errors.Add($(if ($where) { "[$where] $message" } else { $message }))
+                    if (-not [System.String]::IsNullOrWhiteSpace($where)) {
+                        $errors.Add("[$where] $message")
+                    }
+                    else {
+                        $errors.Add($message)
+                    }
                 }
             }
             'test_summary' {
@@ -106,22 +123,28 @@ function Get-TestStatus {
     [CmdletBinding()]
     [OutputType([string])]
     param(
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory = $true)]
         [int] $RunCount,
 
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory = $true)]
         [int] $ErrorCount,
 
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory = $true)]
         [int] $TestExitCode,
 
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory = $true)]
         [bool] $FormattingOk
     )
 
-    if ($RunCount -eq 0 -and $ErrorCount -eq 0 -and $TestExitCode -eq 0) { return 'no_tests' }
-    if ($TestExitCode -eq 0 -and $FormattingOk) { return 'passed' }
-    if ($RunCount -gt 0) { return 'failed' }
+    if ($RunCount -eq 0 -and $ErrorCount -eq 0 -and $TestExitCode -eq 0) {
+        return 'no_tests'
+    }
+    if ($TestExitCode -eq 0 -and $FormattingOk) {
+        return 'passed'
+    }
+    if ($RunCount -gt 0) {
+        return 'failed'
+    }
     'error'
 }
 
@@ -132,16 +155,21 @@ function Write-TestResult {
     #>
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory = $true)]
         [System.Collections.IDictionary] $Result,
 
+        [Parameter(Mandatory = $false)]
         [string] $Path
     )
 
-    $formatting = switch ($Result.formatting_ok) {
-        $true { 'ok' }
-        $false { 'NOT OK: ' + ($Result.unformatted_files -join ', ') }
-        default { 'not checked' }
+    $formatting = if ($Result.formatting_ok -eq $true) {
+        'ok'
+    }
+    elseif ($Result.formatting_ok -eq $false) {
+        'NOT OK: ' + [System.String]::Join(', ', @($Result.unformatted_files))
+    }
+    else {
+        'not checked'
     }
 
     Write-Host ''
@@ -150,13 +178,14 @@ function Write-TestResult {
     Write-Host "Formatting: $formatting"
     Write-Host "Summary:    $($Result.summary.passed) passed, $($Result.summary.failed) failed, $($Result.summary.errored) errored, $($Result.summary.skipped) skipped"
     foreach ($run in $Result.runs) {
-        Write-Host ("  [{0,-5}] {1} :: {2}" -f $run.status, $run.file, $run.run)
+        # PadRight keeps the run names in one column: [pass ], [fail ], [error].
+        Write-Host "  [$($run.status.PadRight(5))] $($run.file) :: $($run.run)"
     }
     foreach ($message in $Result.errors) {
         Write-Host "  ERROR: $message"
     }
 
-    if ($Path) {
+    if (-not [System.String]::IsNullOrWhiteSpace($Path)) {
         $Result | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $Path -Encoding utf8
     }
 }

@@ -25,17 +25,18 @@
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)]
+    [Parameter(Mandatory = $true)]
     [string] $ModulePath,
 
+    [Parameter(Mandatory = $false)]
     [string] $ResultPath
 )
 
 $ErrorActionPreference = 'Stop'
 
-Import-Module (Join-Path $PSScriptRoot 'lib/RepoPaths.psm1')
-Import-Module (Join-Path $PSScriptRoot 'lib/TerraformSandbox.psm1')
-Import-Module (Join-Path $PSScriptRoot 'lib/TerraformTestReport.psm1')
+Import-Module "$PSScriptRoot/lib/RepoPaths.psm1"
+Import-Module "$PSScriptRoot/lib/TerraformSandbox.psm1"
+Import-Module "$PSScriptRoot/lib/TerraformTestReport.psm1"
 
 # --- Validate the input -------------------------------------------------------
 
@@ -62,7 +63,7 @@ try {
     # Phase 1: init, with network.
     $init = Invoke-TerraformInSandbox -WorkDir $workDir -AllowNetwork -TerraformArgs @('init', '-backend=false', '-input=false', '-no-color')
     if ($init.ExitCode -ne 0) {
-        $result.errors = @("terraform init failed:`n" + (($init.Output | Select-Object -Last 20) -join "`n"))
+        $result.errors = @("terraform init failed:`n" + [System.String]::Join("`n", @($init.Output | Select-Object -Last 20)))
         Write-TestResult -Result $result -Path $ResultPath
         exit 1
     }
@@ -71,7 +72,7 @@ try {
     # Only the tests are format-checked: they are what the agent writes.
     $fmt = Invoke-TerraformInSandbox -WorkDir $workDir -TerraformArgs @('fmt', '-check', '-recursive', '-no-color', 'tests')
     $result.formatting_ok = ($fmt.ExitCode -eq 0)
-    $result.unformatted_files = @($fmt.Output | Where-Object { $_ -match '\S' })
+    $result.unformatted_files = @($fmt.Output | Where-Object { -not [System.String]::IsNullOrWhiteSpace($_) })
 
     $test = Invoke-TerraformInSandbox -WorkDir $workDir -TerraformArgs @('test', '-json', '-no-color')
     $parsed = ConvertFrom-TerraformTestJson -Line $test.Output
@@ -83,7 +84,10 @@ try {
         -TestExitCode $test.ExitCode -FormattingOk $result.formatting_ok
 
     Write-TestResult -Result $result -Path $ResultPath
-    exit $(if ($result.status -eq 'passed') { 0 } else { 1 })
+    if ($result.status -eq 'passed') {
+        exit 0
+    }
+    exit 1
 }
 finally {
     Remove-SandboxCopy -Path $workDir
