@@ -26,6 +26,10 @@
 .PARAMETER BaseRef
     The base branch, for example origin/main. Without it the agent gets no diff and
     covers the modules as a whole.
+
+.PARAMETER MaxTurns
+    The most model calls the agent may make. One module needs about 20; past the limit
+    the session ends without a result and nothing is committed.
 #>
 [CmdletBinding()]
 param(
@@ -37,6 +41,10 @@ param(
 
     [Parameter(Mandatory = $false)]
     [string] $Model = 'claude-opus-5-5',
+
+    [Parameter(Mandatory = $false)]
+    [ValidateRange(1, 500)]
+    [int] $MaxTurns = 60,
 
     [Parameter(Mandatory = $true)]
     [string] $OutputDir
@@ -78,9 +86,9 @@ $prompt | Set-Content -LiteralPath (Join-Path $OutputDir 'agent-task.md') -Encod
 $baseline = Save-WorkspaceBaseline -RepoRoot $repoRoot
 $transcript = Join-Path $OutputDir 'agent-transcript.jsonl'
 
-Write-Host "Running the agent ($Model) on: $([System.String]::Join(', ', @($moduleList)))"
+Write-Host "Running the agent ($Model, at most $MaxTurns turns) on: $([System.String]::Join(', ', @($moduleList)))"
 $exitCode = Invoke-TestAgentSession -RepoRoot $repoRoot -Prompt $prompt -Model $Model `
-    -Module $moduleList -InputDir $inputDir -TranscriptPath $transcript
+    -Module $moduleList -InputDir $inputDir -TranscriptPath $transcript -MaxTurns $MaxTurns
 
 # --- 5. Output -----------------------------------------------------------------
 $session = Read-AgentTranscript -Path $transcript

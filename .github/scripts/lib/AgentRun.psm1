@@ -128,6 +128,11 @@ function Invoke-TestAgentSession {
         .github/agent/agent-settings.json), no MCP servers, and must return JSON that
         matches the result schema. The hook reads TF_AGENT_MODULES and
         TF_AGENT_INPUT_DIR, which are set here for the session only.
+
+        The turn limit is passed with --max-turns: with --agent, Claude Code does not
+        apply the maxTurns field of the agent file (checked with Claude Code 2.1.292).
+        When the limit is reached, the session ends without a result, so the verify
+        job rejects it and nothing is committed.
     .OUTPUTS
         The exit code of claude.
     #>
@@ -149,7 +154,12 @@ function Invoke-TestAgentSession {
         [string] $InputDir,
 
         [Parameter(Mandatory = $true)]
-        [string] $TranscriptPath
+        [string] $TranscriptPath,
+
+        # Model calls the agent may make. One module needs about 20.
+        [Parameter(Mandatory = $true)]
+        [ValidateRange(1, 500)]
+        [int] $MaxTurns
     )
 
     # One line, so it passes safely as a single argument.
@@ -160,6 +170,7 @@ function Invoke-TestAgentSession {
         '--print'
         '--agent', 'terraform-test-engineer'
         '--model', $Model
+        '--max-turns', "$MaxTurns"            # the agent file's maxTurns is not applied with --agent
         '--settings', (Join-Path $RepoRoot '.github/agent/agent-settings.json')
         '--strict-mcp-config'                 # no MCP servers, whatever a file may say
         '--permission-mode', 'acceptEdits'    # edits are allowed; the hook decides where
