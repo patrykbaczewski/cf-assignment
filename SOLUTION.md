@@ -39,7 +39,7 @@ agent and skills work in an interactive Claude Code session.
 
 | Decision | Why | Cost |
 |---|---|---|
-| The agent only proposes. A job without the LLM checks its patch (only `modules/*/tests/*.tftest.hcl`; no deletions, links, binaries, credentials), reruns the tests, then commits | An LLM can be wrong or steered by text it reads | Four jobs instead of one step |
+| The agent only proposes. A job without the LLM checks its patch (only `modules/*/tests/*.tftest.hcl`; no deletions, links, binaries, credentials), reruns the tests, then commits | An LLM can be wrong or steered by text it reads | Four jobs instead of one |
 | Settings allow only the test script and no web; a hook blocks anything else and fails closed | Settings alone once let a model write outside `tests/` | The agent cannot even list folders |
 | Tests run in Docker: `init` with network, then `fmt` and `test` without, read-only, non-root, on a copy | `function-app` runs a script during plan; PR code is untrusted | Docker needed locally too |
 | All tooling the workflow trusts lives in `.github/`, `.claude/` and `CLAUDE.md`; one step, an action loaded from `@main`, restores it from the base branch | A PR must not loosen the rules it is checked by; one boundary leaves nothing to forget | Agent changes work only after merge; scripts sit in a hidden folder |
