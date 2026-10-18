@@ -42,7 +42,7 @@ agent and skills work in an interactive Claude Code session.
 | The agent only proposes. A job without the LLM checks its patch (only `modules/*/tests/*.tftest.hcl`; no deletions, links, binaries, credentials), reruns the tests, then commits | An LLM can be wrong or steered by text it reads | Four jobs instead of one step |
 | Settings allow only the test script and no web; a hook blocks anything else and fails closed | Settings alone once let a model write outside `tests/` | The agent cannot even list folders |
 | Tests run in Docker: `init` with network, then `fmt` and `test` without, read-only, non-root, on a copy | `function-app` runs a script during plan; PR code is untrusted | Docker needed locally too |
-| The agent's rules come from the base branch, via an action loaded from `@main` | A PR must not loosen the rules it is checked by | Agent changes work only after merge |
+| All tooling the workflow trusts lives in `.github/`, `.claude/` and `CLAUDE.md`; one step, an action loaded from `@main`, restores it from the base branch | A PR must not loosen the rules it is checked by; one boundary leaves nothing to forget | Agent changes work only after merge; scripts sit in a hidden folder |
 | The comment shows the agent's claimed status next to the verified one | Summaries are AI-written; test results are facts | None |
 | Own workflow, not GitHub Agentic Workflows | Same pattern, but a preview, no subscription token, our sandbox would likely not run there | We maintain the plumbing |
 | `claude-opus-5-5` | On `data-factory`, haiku locked an insecure default into a test and wrote outside `tests/` | Cost per run |
