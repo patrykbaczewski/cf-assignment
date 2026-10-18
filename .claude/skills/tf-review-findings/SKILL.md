@@ -25,7 +25,7 @@ on, which makes this worse"): describe that in `detail` instead.
 | A secret in an output without `sensitive = true` | `high` |
 | Public network access on by default (`public_network_access_enabled`, `public_network_enabled` default `true`) | `medium` |
 | Network rules with `default_action = "Allow"` | `medium` |
-| A role broader than needed (Owner where Contributor or Reader would do) | `medium` |
+| An Owner role (for example `Storage Blob Data Owner`), or a role that may be broader than needed. When you are not sure a smaller role works, keep `medium` and say "verify against the Azure documentation" | `medium` |
 | Code that runs programs during plan: `data "external"`, `local-exec` | `medium` |
 
 **Reliability and correctness**

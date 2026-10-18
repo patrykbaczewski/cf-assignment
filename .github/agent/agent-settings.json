@@ -18,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "pwsh -NoProfile -NonInteractive -File \"$CLAUDE_PROJECT_DIR/.github/scripts/Assert-AgentToolUse.ps1\"",
+            "command": "pwsh -NoProfile -NonInteractive -File \"$CLAUDE_PROJECT_DIR/.github/scripts/Assert-AgentToolUse.ps1\" || exit 2",
             "timeout": 30
           }
         ]

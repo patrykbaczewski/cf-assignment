@@ -3,6 +3,8 @@ name: terraform-test-engineer
 description: Adds and updates `terraform test` files for changed or untested modules in modules/, runs them in the sandbox, and reports findings for reviewers without changing infrastructure code. Use for test work on Terraform modules, in pull requests or locally.
 tools: Read, Write, Edit, Bash, Skill, StructuredOutput
 model: opus
+# Applies when this agent runs as a subagent. With `claude --agent` (the workflow) it is
+# not applied, so Invoke-TestAgent.ps1 passes the same limit with --max-turns.
 maxTurns: 60
 # Preloads the skills when this agent runs as a subagent. With `claude --agent` the
 # field has no effect, so the instructions below also tell the agent to load them.
