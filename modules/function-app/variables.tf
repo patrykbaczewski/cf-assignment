@@ -40,6 +40,17 @@ variable "sku_name" {
   }
 }
 
+variable "ftps_state" {
+  description = "FTP access for deployments: Disabled (no FTP) or FtpsOnly (encrypted FTP only)."
+  type        = string
+  default     = "Disabled"
+
+  validation {
+    condition     = contains(["Disabled", "FtpsOnly"], var.ftps_state)
+    error_message = "ftps_state must be Disabled or FtpsOnly: plain FTP (AllAllowed) sends credentials unencrypted."
+  }
+}
+
 variable "public_network_access_enabled" {
   description = "Allow access to the app from the public internet."
   type        = bool

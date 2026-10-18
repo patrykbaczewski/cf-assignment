@@ -32,6 +32,48 @@ run "app_enforces_https_and_tls_1_2" {
   }
 }
 
+run "ftp_deployment_is_disabled_by_default" {
+  command = plan
+
+  assert {
+    condition     = azurerm_linux_function_app.this.site_config[0].ftps_state == "Disabled"
+    error_message = "Without ftps_state, FTP deployment must be off: plain FTP sends credentials unencrypted."
+  }
+}
+
+run "accepts_ftps_only" {
+  command = plan
+
+  variables {
+    ftps_state = "FtpsOnly"
+  }
+
+  assert {
+    condition     = azurerm_linux_function_app.this.site_config[0].ftps_state == "FtpsOnly"
+    error_message = "An allowed ftps_state (encrypted FTP only) must reach the function app's site config."
+  }
+}
+
+run "rejects_plain_ftp" {
+  command = plan
+
+  variables {
+    ftps_state = "AllAllowed"
+  }
+
+  expect_failures = [var.ftps_state]
+}
+
+run "rejects_lowercase_ftps_state" {
+  command = plan
+
+  variables {
+    ftps_state = "disabled"
+  }
+
+  expect_failures = [var.ftps_state]
+}
+
 run "app_uses_managed_identity_for_storage" {
   command = plan
 
