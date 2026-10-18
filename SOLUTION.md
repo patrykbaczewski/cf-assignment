@@ -12,11 +12,10 @@ pull request ─► detect ──────► agent ────────�
                 (git diff)      read-only        patch, runs tests  update comment
 ```
 
-Pull requests: [#3](https://github.com/patrykbaczewski/cf-assignment/pull/3) is the
-example run, [#5](https://github.com/patrykbaczewski/cf-assignment/pull/5) a finding
-fixed by a person, [#2](https://github.com/patrykbaczewski/cf-assignment/pull/2) the
-baseline tests for the other seven modules (same agent, run locally per module,
-reviewed before merge).
+Pull requests: [#5](https://github.com/patrykbaczewski/cf-assignment/pull/5) is the
+example run, [#2](https://github.com/patrykbaczewski/cf-assignment/pull/2) the baseline
+tests for the other seven modules (same agent, run locally per module, reviewed before
+merge).
 
 ## 1. Where the agent and skills are defined and how they are used
 
@@ -48,23 +47,21 @@ agent and skills work in an interactive Claude Code session.
 | `claude-opus-5-5` | On `data-factory`, haiku locked an insecure default into a test and wrote outside `tests/` | Cost per run |
 | PowerShell 7.4 | The team's language; passes PSScriptAnalyzer | Fewer examples |
 
-## 3. Example run: #3
+## 3. Example run: #5
 
-A person made the fixed `EP1` plan of `function-app` a `sku_name` variable (`EP1`,
-`EP2` or `EP3`). [Run 3](https://github.com/patrykbaczewski/cf-assignment/actions/runs/39065813482):
+A person acted on an earlier finding of the agent: plain FTP was allowed
+(`ftps_state = "AllAllowed"`). The change makes it a variable that accepts `Disabled`
+or `FtpsOnly`, default `Disabled`. [Run 5](https://github.com/patrykbaczewski/cf-assignment/actions/runs/39107217309):
 
 - **detect:** one module.
-- **agent** (21 turns, 66 s): `tf-change-analysis` → read the diff and whole module →
-  `tf-test-authoring`, `tf-review-findings` → wrote `tests/main.tftest.hcl` →
-  `tf-test-run` → tests passed on the first try. One tool use (`ls`) blocked.
-- **`tests_added`, 9 runs:** `EP1` by default, `EP3` accepted, `Y1` and `ep2` rejected,
-  HTTPS, TLS, identity, names, wiring. `override_data` keeps the build script from running.
-- **verify:** 9 of 9 pass, formatted, claims match.
-- **publish:** commit and 5 findings, all older than this change. The worst: plain FTP
-  allowed, with a test that fails on the current code. No test asserts insecure values.
-
-In #5 a person fixed that finding; the agent added 4 runs and noted that the new default
-stops FTP deployments for current callers.
+- **agent** (20 turns, 64 s, nothing blocked): `tf-change-analysis` → read the diff, the
+  whole module and its tests → `tf-test-authoring` → edited `tests/main.tftest.hcl` →
+  `tf-test-run` → tests passed on the first try → `tf-review-findings`.
+- **`tests_updated`:** 4 new runs, the 9 existing ones kept: `Disabled` by default,
+  `FtpsOnly` accepted, `AllAllowed` and `disabled` rejected.
+- **verify:** 13 of 13 pass, formatted, claims match.
+- **publish:** a commit with `[skip ci]` and 6 findings with `file:line`. One is marked
+  as introduced by this change: the new default stops FTP deployments for current callers.
 
 ## 4. What the tests can and cannot show
 
