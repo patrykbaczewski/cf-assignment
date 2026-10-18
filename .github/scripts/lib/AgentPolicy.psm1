@@ -70,7 +70,7 @@ function Test-AgentToolUse {
     .DESCRIPTION
         Bash        only the sandboxed test command, for one module
         Write/Edit  only modules/<name>/tests/*.tftest.hcl, no symbolic links on the way
-        Read        only inside the repository (not .git) or the input folder
+        Read        only inside the repository (not .git, no symbolic links) or the input folder
         other tools allowed here; the permission settings decide about them
     .OUTPUTS
         An object with Allowed and Reason.
@@ -123,6 +123,11 @@ function Test-AgentToolUse {
             $path = "$($ToolInput.file_path)"
             $relative = Resolve-RepoRelativePath -Path $path -RepoRoot $RepoRoot
             if (-not [System.String]::IsNullOrWhiteSpace($relative) -and $relative -ne '.git' -and -not $relative.StartsWith('.git/')) {
+                # A link inside the repository can point anywhere, for example at the
+                # environment of this process (/proc/self/environ).
+                if (Test-SymbolicLinkOnPath -RelativePath $relative -RepoRoot $RepoRoot) {
+                    return New-PolicyDecision -Allowed $false -Reason "'$relative' goes through a symbolic link."
+                }
                 return New-PolicyDecision -Allowed $true -Reason 'Inside the repository.'
             }
             if (-not [System.String]::IsNullOrWhiteSpace($InputDir) -and -not [System.String]::IsNullOrWhiteSpace((Resolve-RepoRelativePath -Path $path -RepoRoot $InputDir))) {

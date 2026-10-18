@@ -149,11 +149,14 @@ jobs:
         shell: pwsh
         env:
           MODULES: ${{ needs.detect.outputs.modules }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
         run: |
+          # Pull requests from forks get no agent and no comment: failing tests fail this job.
+          $fromFork = $env:HEAD_REPO -ne $env:GITHUB_REPOSITORY
           $agentOutput = "$env:RUNNER_TEMP/agent-output"
           ./.github/scripts/Invoke-AgentVerification.ps1 -Modules $env:MODULES `
             -ResultPath "$agentOutput/agent-result.json" -PatchPath "$agentOutput/agent.patch" `
-            -OutputDir "$env:RUNNER_TEMP/verification"
+            -OutputDir "$env:RUNNER_TEMP/verification" -FailOnTestFailure:$fromFork
 
       - name: Keep the verification
         uses: actions/upload-artifact@v7.0.2

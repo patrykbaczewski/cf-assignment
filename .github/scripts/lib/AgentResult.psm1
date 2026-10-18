@@ -4,6 +4,7 @@
 # result is checked like any other untrusted input before the pipeline uses it.
 
 Import-Module "$PSScriptRoot/RepoPaths.psm1"
+Import-Module "$PSScriptRoot/SecretScan.psm1"
 
 function Test-AgentResult {
     <#
@@ -42,6 +43,18 @@ function Test-AgentResult {
         }
     }
     $json = Get-Content -LiteralPath $Path -Raw
+
+    # --- No credentials: the text is posted to the pull request ------------------
+    # A rejected result is not shown in the comment, only these messages (pattern
+    # names, never the matched text).
+    $secrets = @(Find-SecretPattern -Text $json)
+    if ($secrets.Count -gt 0) {
+        return [pscustomobject]@{
+            IsValid = $false
+            Errors  = @($secrets | ForEach-Object { "The result contains something that looks like a credential ($_)." })
+            Result  = $null
+        }
+    }
 
     # --- Shape: the schema ----------------------------------------------------
     $schemaErrors = $null

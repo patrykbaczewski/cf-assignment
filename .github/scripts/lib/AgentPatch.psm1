@@ -5,18 +5,9 @@
 # when any rule is broken: an agent that broke a rule is not trusted with the rest.
 
 Import-Module "$PSScriptRoot/RepoPaths.psm1"
+Import-Module "$PSScriptRoot/SecretScan.psm1"
 
 $script:MaxPatchBytes = 200KB
-
-# Patterns of credentials that must never appear in a committed test (the idea comes
-# from the threat detection step of GitHub Agentic Workflows).
-$script:SecretPatterns = [ordered]@{
-    'Anthropic key'  = 'sk-ant-[A-Za-z0-9_-]{20,}'
-    'GitHub token'   = '\b(gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{40,})'
-    'AWS access key' = '\bAKIA[0-9A-Z]{16}\b'
-    'Private key'    = '-----BEGIN [A-Z ]*PRIVATE KEY-----'
-    'Slack token'    = '\bxox[abprs]-[A-Za-z0-9-]{10,}'
-}
 
 function New-PatchCheck {
     <#
@@ -240,10 +231,8 @@ function Test-AgentPatch {
         }
     }
 
-    foreach ($name in $script:SecretPatterns.Keys) {
-        if ($changes.AddedLines | Where-Object { $_ -cmatch $script:SecretPatterns[$name] }) {
-            $errors.Add("An added line looks like a credential ($name).")
-        }
+    foreach ($name in (Find-SecretPattern -Text $changes.AddedLines)) {
+        $errors.Add("An added line looks like a credential ($name).")
     }
 
     $check = & git -C $RepoRoot apply --check $PatchPath 2>&1

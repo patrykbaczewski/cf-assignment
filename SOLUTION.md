@@ -39,8 +39,8 @@ agent and skills work in an interactive Claude Code session.
 
 | Decision | Why | Cost |
 |---|---|---|
-| The agent only proposes. A job without the LLM checks its patch (only `modules/*/tests/*.tftest.hcl`; no deletions, links, binaries, credentials), reruns the tests, then commits | An LLM can be wrong or steered by text it reads | Four jobs instead of one |
-| Settings allow only the test script and no web; a hook blocks anything else and fails closed | Settings alone once let a model write outside `tests/` | The agent cannot even list folders |
+| The agent only proposes. A job without the LLM checks its patch (only `modules/*/tests/*.tftest.hcl`; no deletions, links, binaries, credentials) and its text (no credentials), reruns the tests, then commits | An LLM can be wrong or steered by text it reads | Four jobs instead of one |
+| Settings allow only the test script and no web; a hook blocks anything else, and any hook error blocks too | Settings alone once let a model write outside `tests/` | The agent cannot even list folders |
 | Tests run in Docker: `init` with network, then `fmt` and `test` without, read-only, non-root, on a copy | `function-app` runs a script during plan; PR code is untrusted | Docker needed locally too |
 | All tooling the workflow trusts lives in `.github/`, `.claude/` and `CLAUDE.md`; one step, an action loaded from `@main`, restores it from the base branch | A PR must not loosen the rules it is checked by; one boundary leaves nothing to forget | Agent changes work only after merge; scripts sit in a hidden folder |
 | The comment shows the agent's claimed status next to the verified one | Summaries are AI-written; test results are facts | None |
@@ -79,7 +79,7 @@ does what its code says", not "it deploys".
 - **Prerequisites:** GitHub Actions, a secret `CLAUDE_CODE_OAUTH_TOKEN`
   (`claude setup-token`), a protected `main`.
 - **In pull requests:** change `modules/**`. Fork pull requests get no secrets: no
-  agent, tests still run.
+  agent, but failing tests fail the check.
 - **Locally** (PowerShell 7.4, Docker): `pwsh -File .github/scripts/Invoke-TerraformTest.ps1 -ModulePath modules/<name>`;
   the agent with `Invoke-TestAgent.ps1` in a scratch checkout (Claude Code 2.1.280+).
 - **Checks:** actionlint, zizmor and PSScriptAnalyzer report nothing.
@@ -101,6 +101,8 @@ does what its code says", not "it deploys".
   5 matched; the fifth item's wording is now fixed.
 - The agent's commit has `[skip ci]`, so as a required check it would get no result.
 - Each run replaces the previous comment (GitHub keeps the edit history).
+- Claude Code lets a tool use through when the hook times out (30 s); the hook takes
+  about a second, and the verify job rechecks every write.
 - A personal subscription token, not an organisation key with spending limits.
 
 ## 8. With many more modules, teams or repositories
@@ -108,7 +110,6 @@ does what its code says", not "it deploys".
 - One agent session per module (matrix job), joined by the verify job.
 - Agent, skills and scripts in one versioned central repository; teams add skills.
 - An organisation ruleset requires that workflow everywhere, so authors cannot change it.
-- Spending limits and usage per repository through one LLM gateway.
 
 ## 9. For a production version
 

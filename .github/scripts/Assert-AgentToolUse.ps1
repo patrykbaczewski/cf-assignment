@@ -15,6 +15,11 @@
     exit code 1, which Claude Code treats as a non-blocking error. The modules it
     imports require PowerShell 7.4 instead; that failure is caught below and blocks.
 
+    Claude Code lets the tool use go ahead for any exit code other than 2, also when
+    pwsh cannot start at all. The hook command in agent-settings.json therefore ends
+    with "|| exit 2". A hook that times out (30 s) is let through by Claude Code; this
+    script takes about a second.
+
     Optional environment variables, set by the workflow:
       TF_AGENT_MODULES    comma-separated modules of this task, for example modules/a,modules/b
       TF_AGENT_INPUT_DIR  a folder outside the repository the agent may read

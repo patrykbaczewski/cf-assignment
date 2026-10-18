@@ -24,6 +24,10 @@
 
 .PARAMETER Modules
     Comma-separated modules of this run, for example modules/a,modules/b.
+
+.PARAMETER FailOnTestFailure
+    Exit with code 1 when a module's tests fail. For pull requests from forks: they get
+    no agent and no comment, so the job result is the only place the tests show up.
 #>
 [CmdletBinding()]
 param(
@@ -37,7 +41,10 @@ param(
     [string] $Modules,
 
     [Parameter(Mandatory = $true)]
-    [string] $OutputDir
+    [string] $OutputDir,
+
+    [Parameter(Mandatory = $false)]
+    [switch] $FailOnTestFailure
 )
 
 $ErrorActionPreference = 'Stop'
@@ -127,4 +134,9 @@ Verdict: $verdict (can commit: $($verification.can_commit))
 "@
 foreach ($message in @($resultCheck.Errors) + @($patchCheck.Errors) + $warnings) {
     Write-Host "  - $message"
+}
+
+if ($FailOnTestFailure -and -not $testsOk) {
+    Write-Host 'The tests fail; this pull request gets no comment, so the job fails.'
+    exit 1
 }
